@@ -1,0 +1,6 @@
+{
+  "name": "ARIA Voice Assistant",
+  "description": "JARVIS-inspired Voice Assistant with Speech Recognition, Text-To-Speech, Weather, Reminders, Wikipedia, and Python Code Tutorial.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
