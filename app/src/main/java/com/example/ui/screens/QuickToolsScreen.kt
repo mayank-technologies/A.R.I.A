@@ -79,7 +79,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.app.Activity
 import android.widget.Toast
+import com.example.assistant.background.AriaBackgroundWakeService
+import com.example.assistant.glyph.AriaGlyphHardwareManager
+import com.example.assistant.overlay.AriaEdgeGlowOverlayManager
+import com.example.assistant.overlay.AriaEdgeGlowView
 import com.example.assistant.screenshare.AriaScreenShareManager
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 
 @Composable
 fun QuickToolsScreen(
@@ -89,6 +99,9 @@ fun QuickToolsScreen(
     val context = LocalContext.current
     val userName by viewModel.userName.collectAsState()
     val isSharingActive by AriaScreenShareManager.isSharingActive.collectAsState()
+    val isBackgroundWakeRunning by AriaBackgroundWakeService.isRunning.collectAsState()
+    val isGlowActive by AriaEdgeGlowOverlayManager.isGlowActive.collectAsState()
+    val isNothingPhone by AriaGlyphHardwareManager.isNothingPhone.collectAsState()
 
     var showDeveloperHubDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
@@ -460,6 +473,177 @@ fun QuickToolsScreen(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("Overlay Perm", color = CyberCyan, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Background Always-Listening Wake Word & Edge Glow Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(20.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isBackgroundWakeRunning) ElectricEmerald else CyberCyan.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(
+                                    if (isBackgroundWakeRunning) ElectricEmerald.copy(alpha = 0.2f)
+                                    else CyberCyan.copy(alpha = 0.15f),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isBackgroundWakeRunning) Icons.Default.Mic else Icons.Default.MicOff,
+                                contentDescription = "Background Wake Word",
+                                tint = if (isBackgroundWakeRunning) ElectricEmerald else CyberCyan,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "🎙️ Background Always-Listening",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                if (isBackgroundWakeRunning) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(ElectricEmerald)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = if (isBackgroundWakeRunning) "Foreground Service ACTIVE: Say 'Hey ARIA' anytime"
+                                else "Listen for 'Hey ARIA' even when app is minimized",
+                                color = if (isBackgroundWakeRunning) ElectricEmerald else TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = if (isBackgroundWakeRunning) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+
+                        Switch(
+                            checked = isBackgroundWakeRunning,
+                            onCheckedChange = { enable ->
+                                if (enable) {
+                                    AriaBackgroundWakeService.start(context)
+                                    Toast.makeText(context, "ARIA Background Voice Engine started! Say 'Hey ARIA'", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    AriaBackgroundWakeService.stop(context)
+                                    Toast.makeText(context, "ARIA Background Voice Engine stopped", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = ElectricEmerald,
+                                checkedTrackColor = ElectricEmerald.copy(alpha = 0.3f),
+                                uncheckedThumbColor = TextSecondary,
+                                uncheckedTrackColor = SurfaceVariantDark
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Software Screen Edge Glow Visual Indicator Controls
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SurfaceVariantDark.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.25f))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.LightMode,
+                                    contentDescription = "Screen Edge Glow",
+                                    tint = CyberCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "✨ Screen Edge Glow Overlay (SYSTEM_ALERT_WINDOW)",
+                                    color = CyberCyan,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Subtle cyan glowing border lights up across your screen whenever ARIA detects wake word, listens or speaks (works over ANY app).",
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            )
+                            if (isNothingPhone) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "📱 Nothing Phone Detected: Physical Glyph Matrix LED animation supported.",
+                                    color = ElectricEmerald,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        if (!AriaEdgeGlowOverlayManager.isOverlayPermissionGranted(context)) {
+                                            showOverlayPermissionDialog = true
+                                        } else {
+                                            AriaEdgeGlowOverlayManager.pulseForDuration(context, durationMs = 4000)
+                                            Toast.makeText(context, "Showing 4-sec Edge Glow pulse preview!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.GraphicEq,
+                                        contentDescription = "Test Glow",
+                                        tint = DeepSpace,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Test Edge Glow", color = DeepSpace, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+
+                                if (!AriaEdgeGlowOverlayManager.isOverlayPermissionGranted(context)) {
+                                    Button(
+                                        onClick = { showOverlayPermissionDialog = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan)
+                                    ) {
+                                        Text("Grant Perm", color = CyberCyan, fontSize = 12.sp)
+                                    }
                                 }
                             }
                         }

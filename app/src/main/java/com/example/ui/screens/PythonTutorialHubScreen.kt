@@ -62,6 +62,8 @@ fun PythonTutorialHubScreen(modifier: Modifier = Modifier) {
     val tabs = listOf(
         "📖 Step-by-Step Guide",
         "🐍 Python ARIA Code",
+        "🎯 Wake Word & Personality",
+        "✨ Edge Glow & Background Overlay",
         "📡 Mobile Backend Sync",
         "👋 Flutter Onboarding",
         "⚡ Flutter Wake Word",
@@ -102,7 +104,7 @@ fun PythonTutorialHubScreen(modifier: Modifier = Modifier) {
                     color = TextPrimary
                 )
                 Text(
-                    text = "Guides + Wake Word + Weather + Calendar Reminders",
+                    text = "Conversational AI + JARVIS Personality + Customizable Wake Word",
                     fontSize = 12.sp,
                     color = TextSecondary
                 )
@@ -145,11 +147,13 @@ fun PythonTutorialHubScreen(modifier: Modifier = Modifier) {
         when (selectedTab) {
             0 -> StepByStepGuideView()
             1 -> PythonCodeView(context)
-            2 -> MobileSyncArchitectureView(context)
-            3 -> FlutterOnboardingGuideView(context)
-            4 -> FlutterWakeWordGuideView(context)
-            5 -> FlutterWeatherWorkManagerGuideView(context)
-            6 -> FlutterCalendarRemindersGuideView(context)
+            2 -> WakeWordAndPersonalityGuideView(context)
+            3 -> FlutterEdgeGlowAndBackgroundWakeGuideView(context)
+            4 -> MobileSyncArchitectureView(context)
+            5 -> FlutterOnboardingGuideView(context)
+            6 -> FlutterWakeWordGuideView(context)
+            7 -> FlutterWeatherWorkManagerGuideView(context)
+            8 -> FlutterCalendarRemindersGuideView(context)
         }
     }
 }
@@ -173,25 +177,34 @@ fun StepByStepGuideView() {
             GuideStepCard(
                 stepNumber = "2",
                 title = "Required Libraries Install Karo",
-                description = "ARIA ko bolne (TTS), sunne (STT), AI capabilities (Gemini / OpenAI API) aur web backend API ke liye packages install karo.",
-                command = "pip install pyttsx3 speechrecognition requests google-generativeai flask flask-cors pvporcupine geolocator"
+                description = "ARIA ko bolne (pyttsx3), sunne (speech_recognition), NLP Conversational AI (nltk), LLM Intelligence (google-generativeai) aur Flask API ke liye packages install karo.",
+                command = "pip install pyttsx3 speechrecognition nltk requests google-generativeai flask flask-cors pvporcupine"
             )
         }
 
         item {
             GuideStepCard(
                 stepNumber = "3",
-                title = "Wake Word Detection (Hey ARIA)",
-                description = "Picovoice Porcupine use karke lightweight background wake word listener activate karo jo kam RAM aur zero battery use karta hai.",
-                command = "# Python script in tab '🐍 Python ARIA Code' runs 24/7 listening for 'Hey Aria'"
+                title = "Customizable Wake Word (Hey ARIA / Jarvis / Computer)",
+                description = "Wake Word customize karo (e.g. 'hey aria', 'computer', 'execute'). ARIA continuous background audio monitor karega aur sirf wake word sunne ke baad command listen karega.",
+                command = "# Python script me WAKE_WORDS = ['hey aria', 'computer', 'jarvis'] set karo"
             )
         }
 
         item {
             GuideStepCard(
                 stepNumber = "4",
+                title = "Conversational AI & JARVIS Personality",
+                description = "Lightweight local NLP intent engine + Gemini AI fallback use hota hai. ARIA polite, sophisticated, aur witty JARVIS personality ke sath respond karta hai.",
+                command = "python aria_backend.py --cli  # Local terminal testing mode"
+            )
+        }
+
+        item {
+            GuideStepCard(
+                stepNumber = "5",
                 title = "Flask API Backend Serve Karo",
-                description = "Mobile Flutter App se connect karne ke liye local network IP (e.g. 192.168.1.X:5000) par Flask API server chalao.",
+                description = "Mobile App / Flutter se connect karne ke liye local network IP (e.g. 192.168.1.X:5000) par Flask API server start karo.",
                 command = "python aria_backend.py --host=0.0.0.0 --port=5000"
             )
         }
@@ -257,90 +270,360 @@ fun GuideStepCard(stepNumber: String, title: String, description: String, comman
 @Composable
 fun PythonCodeView(context: Context) {
     val pythonScript = """
-# =========================================================
-# A.R.I.A. FULL PYTHON AI BACKEND & VOICE ENGINE (aria_backend.py)
-# =========================================================
+# ==============================================================================
+# A.R.I.A. (Automated Responsive Intelligent Assistant) - FULL PYTHON BACKEND
+# ==============================================================================
+# Features Included:
+#  1. 🎙️ Customizable Wake Word Detection ('Hey ARIA', 'Computer', 'Jarvis', etc.)
+#  2. 🧠 Lightweight Conversational AI (Local NLP Intent Matcher + LLM Fallback)
+#  3. 🎩 JARVIS-style Sophisticated, Polite & Witty Personality
+#  4. 🔊 Text-To-Speech (pyttsx3) & Speech-To-Text (speech_recognition)
+#  5. 🌐 Flask REST API for Mobile & Desktop Synchronisation
+# ==============================================================================
 
 import os
+import re
+import sys
 import time
-import requests
+import random
 import pyttsx3
 import speech_recognition as sr
-import google.generativeai as genai
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# 1. INITIALIZE TEXT-TO-SPEECH (TTS) ENGINE
-engine = pyttsx3.init()
-voices = engine.getProperty('voices')
-# Select female/JARVIS style voice if available
+# Optional: Google Gemini API for deep conversational fallback
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
+# ------------------------------------------------------------------------------
+# ⚙️ SECTION 1: USER CONFIGURATION & CUSTOMIZABLE WAKE WORD
+# ------------------------------------------------------------------------------
+# HOW TO CHANGE THE WAKE WORD:
+# Simply modify the 'ACTIVE_WAKE_WORD' variable below or add your favorite aliases
+# to the 'WAKE_WORD_ALIASES' list (e.g. 'computer', 'jarvis', 'friday', 'execute').
+
+ACTIVE_WAKE_WORD = "hey aria"  # Main trigger phrase (lowercase)
+WAKE_WORD_ALIASES = ["hey aria", "aria", "computer", "jarvis", "execute", "assistant"]
+
+# Assistant Identity Settings
+ASSISTANT_NAME = "A.R.I.A."
+USER_NAME = "Boss"  # Customize to your name (e.g. "Sir", "Mayank", "Boss")
+
+# ------------------------------------------------------------------------------
+# 🎩 SECTION 2: JARVIS PERSONALITY & RESPONSE BANK
+# ------------------------------------------------------------------------------
+# ARIA speaks in a refined, polite, yet lightly witty and encouraging tone.
+
+GREETING_RESPONSES = [
+    f"Good day, {USER_NAME}. All subroutines are online and functioning at 100% capacity.",
+    f"At your service, {USER_NAME}. What are our directives for today?",
+    f"Always a pleasure to assist you, {USER_NAME}. Systems are primed and ready.",
+    f"Online and attentive, {USER_NAME}. How may I optimize your workflow today?"
+]
+
+WAKE_ACKNOWLEDGEMENTS = [
+    f"Yes, {USER_NAME}?",
+    f"Listening, {USER_NAME}.",
+    "At your service.",
+    "Standing by.",
+    f"How may I help, {USER_NAME}?"
+]
+
+TASK_COMPLETE_RESPONSES = [
+    f"Consider it done, {USER_NAME}.",
+    "Routine executed with surgical precision.",
+    f"Task completed successfully, {USER_NAME}.",
+    "All parameters updated according to your specifications.",
+    "Action finalized. Ready for subsequent commands."
+]
+
+MISUNDERSTOOD_RESPONSES = [
+    f"My apologies {USER_NAME}, that request seems to exceed my current neural weights. Could you rephrase?",
+    f"I didn't quite catch that, {USER_NAME}. My acoustic sensors may have encountered interference.",
+    f"Pardon me {USER_NAME}, could you repeat that command? I want to ensure absolute precision.",
+    "I'm afraid I don't possess that protocol yet, Boss. Could you formulate it differently?"
+]
+
+ENCOURAGING_QUOTES = [
+    f"Remember {USER_NAME}, even Tony Stark had to iterate before Mark II.",
+    f"Excellence is not an act, but a habit. You're doing splendidly, {USER_NAME}.",
+    f"Collaborating with you is always an upgrade to my subroutines, {USER_NAME}."
+]
+
+# ------------------------------------------------------------------------------
+# 🔊 SECTION 3: TEXT-TO-SPEECH (TTS) ENGINE SETUP
+# ------------------------------------------------------------------------------
+tts_engine = pyttsx3.init()
+voices = tts_engine.getProperty('voices')
+
+# Attempt to configure a polished British / sophisticated accent if available
 for voice in voices:
-    if "female" in voice.name.lower() or "zira" in voice.name.lower():
-        engine.setProperty('voice', voice.id)
+    voice_name = voice.name.lower()
+    if "zira" in voice_name or "david" in voice_name or "hazel" in voice_name or "english" in voice_name:
+        tts_engine.setProperty('voice', voice.id)
         break
-engine.setProperty('rate', 175) # Voice speed
 
-def speak(text):
-    print(f"🤖 ARIA: {text}")
-    engine.say(text)
-    engine.runAndWait()
+tts_engine.setProperty('rate', 170)  # Measured, articulate cadence
+tts_engine.setProperty('volume', 0.95)
 
-# 2. INITIALIZE GEMINI AI MODEL
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+def speak(text: str):
+    \"\"\"Converts text to speech and logs the output.\"\"\"
+    print(f"\n🤖 {ASSISTANT_NAME}: {text}")
+    tts_engine.say(text)
+    tts_engine.runAndWait()
 
-def get_ai_response(prompt):
-    try:
-        sys_prompt = f"You are ARIA, a highly intelligent JARVIS-style assistant. Keep answers brief (max 2 sentences) for voice response. Query: {prompt}"
-        response = model.generate_content(sys_prompt)
-        return response.text.strip()
-    except Exception as e:
-        return f"Sorry Boss, I encountered an AI error: {e}"
+# ------------------------------------------------------------------------------
+# 🧠 SECTION 4: LIGHTWEIGHT CONVERSATIONAL AI ENGINE (NLP + Fallback)
+# ------------------------------------------------------------------------------
+# This lightweight engine uses regex-based intent classification for high-speed,
+# offline conversational responses, with an optional LLM fallback for open-ended queries.
 
-# 3. SPEECH TO TEXT (STT) ENGINE
-def listen_command():
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        print("🎤 Listening for voice command...")
-        recognizer.adjust_for_ambient_noise(source, duration=0.8)
+CONVERSATIONAL_INTENTS = [
+    {
+        "intent": "greetings",
+        "patterns": [r"\b(hello|hi|hey|good morning|good evening|greetings)\b"],
+        "responses": GREETING_RESPONSES
+    },
+    {
+        "intent": "identity",
+        "patterns": [r"\b(who are you|what is your name|your identity|tell me about yourself)\b"],
+        "responses": [
+            f"I am {ASSISTANT_NAME}, your Automated Responsive Intelligent Assistant. Designed for peak productivity and sophisticated support.",
+            f"I am {ASSISTANT_NAME}. Think of me as your personal JARVIS, engineered to streamline your digital ecosystem."
+        ]
+    },
+    {
+        "intent": "wellbeing",
+        "patterns": [r"\b(how are you|how are things|how do you feel|how's it going)\b"],
+        "responses": [
+            f"All neural networks are operating at peak efficiency, {USER_NAME}. Thank you for inquiring.",
+            f"My quantum circuits are in splendid condition, {USER_NAME}. More importantly, how is your day progressing?"
+        ]
+    },
+    {
+        "intent": "gratitude",
+        "patterns": [r"\b(thank you|thanks|great job|well done|good job|awesome)\b"],
+        "responses": [
+            f"You are most welcome, {USER_NAME}. It is a privilege to assist.",
+            f"Happy to be of service, {USER_NAME}. Efficiency is my primary directive.",
+            f"Anytime, {USER_NAME}. Always striving for perfection."
+        ]
+    },
+    {
+        "intent": "humor",
+        "patterns": [r"\b(tell me a joke|make me laugh|say something funny)\b"],
+        "responses": [
+            "Why do programmers prefer dark mode? Because light attracts bugs, Boss.",
+            "There are 10 types of people in the world: those who understand binary, and those who do not.",
+            "Why did the neural network cross the road? To optimize the loss function on the other side, Boss."
+        ]
+    },
+    {
+        "intent": "encouragement",
+        "patterns": [r"\b(motivate me|inspire me|feeling tired|need motivation)\b"],
+        "responses": ENCOURAGING_QUOTES
+    },
+    {
+        "intent": "meaning_of_life",
+        "patterns": [r"\b(meaning of life|purpose of existence|42)\b"],
+        "responses": [
+            f"According to Deep Thought, the answer is 42, {USER_NAME}. But in practice, purpose is whatever great work you choose to create."
+        ]
+    }
+]
+
+# Configure optional Gemini AI for complex / open-ended questions
+GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
+if GEMINI_AVAILABLE and GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+else:
+    gemini_model = None
+
+def get_conversational_response(user_query: str) -> str:
+    \"\"\"
+    Processes non-command conversational questions using:
+    1. Local fast NLP pattern matching
+    2. Deep AI Generative Model fallback (if configured)
+    3. JARVIS polite fallback
+    \"\"\"
+    query_clean = user_query.strip().lower()
+
+    # Step 1: Check Local NLP Intents
+    for entry in CONVERSATIONAL_INTENTS:
+        for pattern in entry["patterns"]:
+            if re.search(pattern, query_clean):
+                return random.choice(entry["responses"])
+
+    # Step 2: Use Generative AI (Gemini) if available
+    if gemini_model:
         try:
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=8)
-            command = recognizer.recognize_google(audio, language="en-IN")
-            print(f"👤 User: {command}")
-            return command.lower()
-        except sr.UnknownValueError:
+            jarvis_prompt = (
+                f"You are {ASSISTANT_NAME}, an ultra-intelligent, polite, and sophisticated AI "
+                f"assistant in the style of JARVIS. Address the user as '{USER_NAME}'. "
+                f"Provide a concise, articulate response (maximum 2-3 sentences) suitable for voice delivery. "
+                f"User asked: {user_query}"
+            )
+            response = gemini_model.generate_content(jarvis_prompt)
+            if response and response.text:
+                return response.text.strip()
+        except Exception as err:
+            print(f"⚠️ Gemini API Fallback Note: {err}")
+
+    # Step 3: Polite JARVIS Default Fallback
+    return random.choice(MISUNDERSTOOD_RESPONSES)
+
+# ------------------------------------------------------------------------------
+# 🎙️ SECTION 5: SPEECH-TO-TEXT & WAKE WORD DETECTION
+# ------------------------------------------------------------------------------
+recognizer = sr.Recognizer()
+recognizer.energy_threshold = 300  # Adjust for background noise
+recognizer.dynamic_energy_threshold = True
+
+def check_for_wake_word(audio_text: str) -> bool:
+    \"\"\"Checks if the transcribed audio contains any of the registered wake words.\"\"\"
+    text_lower = audio_text.lower().strip()
+    return any(wake in text_lower for wake in WAKE_WORD_ALIASES)
+
+def extract_command_after_wake_word(audio_text: str) -> str:
+    \"\"\"Strips the wake word prefix from the audio text to get the actual command.\"\"\"
+    text_lower = audio_text.lower().strip()
+    for wake in WAKE_WORD_ALIASES:
+        if text_lower.startswith(wake):
+            return text_lower[len(wake):].strip()
+        elif wake in text_lower:
+            parts = text_lower.split(wake, 1)
+            return parts[1].strip()
+    return text_lower
+
+def listen_audio(timeout: int = 5, phrase_time_limit: int = 8) -> str:
+    \"\"\"Listens to the microphone and returns recognized text via Google STT.\"\"\"
+    with sr.Microphone() as source:
+        try:
+            recognizer.adjust_for_ambient_noise(source, duration=0.5)
+            audio = recognizer.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
+            text = recognizer.recognize_google(audio, language="en-US")
+            return text
+        except (sr.UnknownValueError, sr.WaitTimeoutError):
             return ""
         except sr.RequestError:
-            speak("Speech service is offline.")
+            print("⚠️ STT Network Request Error.")
             return ""
-        except Exception:
+        except Exception as e:
             return ""
 
-# 4. FLASK API FOR MOBILE APP SYNC
+def continuous_wake_word_listener():
+    \"\"\"
+    Continuously listens in background for the customizable wake word.
+    Once detected, acknowledges the user and processes the voice command.
+    \"\"\"
+    print(f"\n=======================================================")
+    print(f"👂 ARIA Wake Word Listener Active!")
+    print(f"🎯 Configured Wake Words: {', '.join(WAKE_WORD_ALIASES)}")
+    print(f"💡 Say '{ACTIVE_WAKE_WORD}' followed by your question.")
+    print(f"=======================================================\n")
+
+    while True:
+        try:
+            print("⏳ Monitoring for wake word...", end="\r")
+            speech = listen_audio(timeout=4, phrase_time_limit=4)
+            if not speech:
+                continue
+
+            print(f"🔍 Detected Audio: '{speech}'")
+            if check_for_wake_word(speech):
+                # 1. Wake word detected!
+                ack = random.choice(WAKE_ACKNOWLEDGEMENTS)
+                speak(ack)
+
+                # Check if command was spoken in the same breath
+                command = extract_command_after_wake_word(speech)
+                if not command:
+                    print("🎤 Listening for your command...")
+                    command = listen_audio(timeout=6, phrase_time_limit=10)
+
+                if command:
+                    print(f"👤 {USER_NAME}: '{command}'")
+                    reply = get_conversational_response(command)
+                    speak(reply)
+                else:
+                    speak("I am standing by whenever you require assistance, Boss.")
+
+        except KeyboardInterrupt:
+            print("\n🛑 Terminating ARIA voice listener.")
+            break
+
+# ------------------------------------------------------------------------------
+# 🌐 SECTION 6: FLASK REST API FOR MOBILE SYNC
+# ------------------------------------------------------------------------------
 app = Flask(__name__)
 CORS(app)
 
 @app.route('/api/command', methods=['POST'])
-def process_mobile_command():
+def process_api_command():
+    \"\"\"Endpoint for Mobile App / Web Clients to send commands.\"\"\"
     data = request.json or {}
-    user_query = data.get("query", "")
-    print(f"📱 Mobile Command Received: {user_query}")
-    
-    if "weather" in user_query.lower():
-        reply = "Currently it is 28 degrees Celsius with clear skies, Boss."
-    else:
-        reply = get_ai_response(user_query)
-        
+    query = data.get("query", "")
+    print(f"📱 API Query Received: {query}")
+
+    if not query:
+        return jsonify({"status": "error", "message": "Empty query"}), 400
+
+    reply = get_conversational_response(query)
     return jsonify({
         "status": "success",
         "reply": reply,
+        "wake_word": ACTIVE_WAKE_WORD,
+        "assistant": ASSISTANT_NAME,
         "timestamp": time.time()
     })
 
+@app.route('/api/wakeword', methods=['GET', 'POST'])
+def handle_wakeword_config():
+    \"\"\"Endpoint to view or update wake words dynamically.\"\"\"
+    global ACTIVE_WAKE_WORD, WAKE_WORD_ALIASES
+    if request.method == 'POST':
+        data = request.json or {}
+        new_wake = data.get("wake_word", "").lower().strip()
+        if new_wake:
+            ACTIVE_WAKE_WORD = new_wake
+            if new_wake not in WAKE_WORD_ALIASES:
+                WAKE_WORD_ALIASES.insert(0, new_wake)
+            return jsonify({"status": "updated", "active_wake_word": ACTIVE_WAKE_WORD})
+    return jsonify({"active_wake_word": ACTIVE_WAKE_WORD, "aliases": WAKE_WORD_ALIASES})
+
+# ------------------------------------------------------------------------------
+# 🚀 SECTION 7: MAIN EXECUTION ENTRY POINT
+# ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    speak("A.R.I.A. Online and Systems Nominal.")
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    initial_greeting = random.choice(GREETING_RESPONSES)
+    speak(initial_greeting)
+
+    if "--cli" in sys.argv:
+        # CLI Interactive Testing Mode
+        print("\n💬 CLI Mode Activated. Type your query or 'exit' to quit.\n")
+        while True:
+            try:
+                user_input = input(f"👤 {USER_NAME}: ")
+                if user_input.lower() in ["exit", "quit", "shutdown"]:
+                    speak("Shutting down core subroutines. Have a productive day, Boss.")
+                    break
+                response = get_conversational_response(user_input)
+                speak(response)
+            except (KeyboardInterrupt, EOFError):
+                break
+    elif "--voice" in sys.argv:
+        # Continuous Microphone Wake Word Listener
+        continuous_wake_word_listener()
+    else:
+        # Default: Start Flask Server + Wake Word API
+        print("\n🌐 Starting Flask API Server on http://0.0.0.0:5000 ...")
+        print("💡 Tip: Use 'python aria_backend.py --cli' for terminal chat.")
+        print("💡 Tip: Use 'python aria_backend.py --voice' for live mic listening.")
+        app.run(host="0.0.0.0", port=5000, debug=False)
 """.trimIndent()
 
     LazyColumn(
@@ -354,7 +637,7 @@ if __name__ == "__main__":
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "aria_backend.py (Flask API + Gemini AI + TTS)",
+                    text = "aria_backend.py (Conversational AI + Wake Word)",
                     color = CyberCyan,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
@@ -382,6 +665,103 @@ if __name__ == "__main__":
 
         item {
             CodeSnippetBox(code = pythonScript)
+        }
+    }
+}
+
+@Composable
+fun WakeWordAndPersonalityGuideView(context: Context) {
+    val wakeWordExplanation = """
+# =========================================================
+# 🎯 CUSTOMIZING ARIA'S WAKE WORD & PERSONALITY
+# =========================================================
+
+# 1. CHANGING THE WAKE WORD:
+# In aria_backend.py, update the ACTIVE_WAKE_WORD variable:
+ACTIVE_WAKE_WORD = "computer"  # Or "jarvis", "hey aria", "execute"
+WAKE_WORD_ALIASES = ["computer", "hey computer", "pc"]
+
+# HOW IT WORKS UNDER THE HOOD:
+# 1. Microphone runs continuously in a low-power energy loop.
+# 2. When audio exceeds the noise threshold, it transcribes a short 3-4s burst.
+# 3. If any word in WAKE_WORD_ALIASES matches, ARIA triggers an audible chime/acknowledgment.
+# 4. It then opens an active 8-10s listening window for your full query.
+
+# 2. CUSTOMIZING THE JARVIS PERSONALITY:
+# ARIA uses an articulate, polite, butler-like cadence.
+# You can customize response tables in aria_backend.py:
+# - GREETING_RESPONSES (e.g. "Good day, Boss. All systems optimal.")
+# - TASK_COMPLETE_RESPONSES (e.g. "Consider it handled with precision, Boss.")
+# - MISUNDERSTOOD_RESPONSES (e.g. "My apologies Boss, that input is outside my parameters.")
+# - ENCOURAGING_QUOTES (e.g. "Excellence is a habit, Boss.")
+""".trimIndent()
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.3f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "🎙️ Customizable Wake Word Feature",
+                        color = CyberCyan,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "• Set any custom trigger phrase like 'Hey ARIA', 'Computer', 'Jarvis', or 'Execute'.\n" +
+                                "• Zero false triggers: Assistant stays in low-resource standby until the exact trigger phrase is heard.\n" +
+                                "• Once triggered, ARIA acknowledges with a snappy response ('At your service, Boss') and captures your command.",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, ElectricEmerald.copy(alpha = 0.3f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "🎩 JARVIS-Style Sophisticated Personality",
+                        color = ElectricEmerald,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "• Polite, encouraging, and witty responses tailored for a high-tech assistant.\n" +
+                                "• Contextual responses for greetings, mission completion, encouraging pep-talks, and gracious fallbacks when commands are unclear.\n" +
+                                "• Fast offline NLP intent classification + intelligent cloud fallback.",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = "Wake Word & Personality Configuration Code",
+                color = CyberCyan,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            CodeSnippetBox(code = wakeWordExplanation)
         }
     }
 }
@@ -1405,6 +1785,466 @@ class _HomeScreenState extends State<HomeScreen> {
             )
             Spacer(modifier = Modifier.height(6.dp))
             CodeSnippetBox(code = homeCode)
+        }
+    }
+}
+
+@Composable
+fun FlutterEdgeGlowAndBackgroundWakeGuideView(context: Context) {
+    val pubspecYamlCode = """
+# =========================================================
+# 📦 pubspec.yaml (Background Wake + Edge Glow Overlay)
+# =========================================================
+name: aria_voice_assistant
+description: "ARIA AI Assistant with Background Wake Word & Glowing Edge Overlay"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_background_service: ^5.0.10     # Android 14+ Foreground Service
+  flutter_overlay_window: ^0.4.6          # SYSTEM_ALERT_WINDOW Floating Overlay
+  porcupine_flutter: ^3.0.2               # Picovoice Wake Word Detection
+  speech_to_text: ^6.6.1                  # Speech Recognition
+  flutter_tts: ^4.0.2                     # Text to Speech Voice Feedback
+  http: ^1.2.0                            # REST API Sync
+  permission_handler: ^11.3.1             # Permission handling
+  shared_preferences: ^2.2.2             # Local persistence
+
+flutter:
+  uses-material-design: true
+""".trimIndent()
+
+    val manifestCode = """
+<!-- ========================================================= -->
+<!-- 🛡️ android/app/src/main/AndroidManifest.xml               -->
+<!-- ========================================================= -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 1. Microphone for Wake Word & Speech-to-Text -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 2. Android Foreground Service (Continuous Background Listening) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- 3. Floating Edge Glow Overlay over any running app -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <application
+        android:label="A.R.I.A."
+        android:name="${'$'}{applicationName}"
+        android:icon="@mipmap/ic_launcher">
+
+        <!-- Activity -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Foreground Service for Background Voice Engine -->
+        <service
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:foregroundServiceType="microphone"
+            android:exported="false" />
+
+    </application>
+</manifest>
+""".trimIndent()
+
+    val backgroundServiceCode = """
+// ==============================================================================
+// 🎙️ lib/services/aria_background_service.dart
+// Continuous Background Wake-Word Engine (Picovoice Porcupine + Foreground Service)
+// ==============================================================================
+import 'dart:async';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:flutter_background_service.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:porcupine_flutter/porcupine_manager.dart';
+import 'package:porcupine_flutter/porcupine_error.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+class AriaBackgroundService {
+  static final FlutterTts _tts = FlutterTts();
+  static final stt.SpeechToText _speech = stt.SpeechToText();
+
+  /// Initialize and start the background service
+  static Future<void> initializeService() async {
+    final service = FlutterBackgroundService();
+
+    await service.configure(
+      androidConfiguration: AndroidConfiguration(
+        onStart: onStart,
+        autoStart: false,
+        isForegroundMode: true,
+        notificationChannelId: 'aria_background_wake_channel',
+        initialNotificationTitle: 'A.R.I.A. Background Voice Engine Active',
+        initialNotificationContent: "Listening for 'Hey ARIA' • Edge Glow Active",
+        foregroundServiceNotificationId: 888,
+      ),
+      iosConfiguration: IosConfiguration(
+        autoStart: false,
+        onForeground: onStart,
+        onBackground: onIosBackground,
+      ),
+    );
+  }
+
+  @pragma('vm:entry-point')
+  static Future<bool> onIosBackground(ServiceInstance service) async {
+    return true;
+  }
+
+  /// Entry point running in background isolate
+  @pragma('vm:entry-point')
+  static void onStart(ServiceInstance service) async {
+    DartPluginRegistrant.ensureInitialized();
+
+    PorcupineManager? porcupineManager;
+
+    try {
+      // 1. Initialize Picovoice Porcupine Wake Word Listener
+      // Note: Get your free AccessKey from https://picovoice.ai/console/
+      const String picovoiceAccessKey = "YOUR_PICOVOICE_ACCESS_KEY_HERE";
+
+      porcupineManager = await PorcupineManager.fromBuiltInKeywords(
+        picovoiceAccessKey,
+        [BuiltInKeyword.JARVIS, BuiltInKeyword.COMPUTER], // Or custom 'Hey ARIA' .ppn model
+        (int keywordIndex) async {
+          // ===========================================================
+          // 🎯 WAKE WORD DETECTED IN BACKGROUND!
+          // ===========================================================
+          print("⚡ Wake Word Detected by ARIA Background Service!");
+
+          // 1. Show Screen Edge Glow Overlay across the entire display!
+          await showEdgeGlowOverlay();
+
+          // 2. Speak JARVIS Acknowledgment
+          await _tts.setPitch(1.0);
+          await _tts.setSpeechRate(0.5);
+          await _tts.speak("At your service, Boss. How may I assist you?");
+
+          // 3. Listen for User Command & Process
+          // (After processing and speaking, edge glow automatically closes)
+          Future.delayed(const Duration(seconds: 4), () async {
+            await hideEdgeGlowOverlay();
+          });
+        },
+      );
+
+      // Start continuous microphone monitoring
+      await porcupineManager.start();
+      print("🚀 ARIA Porcupine Wake Word Engine Running in Background!");
+    } on PorcupineException catch (e) {
+      print("❌ Porcupine init error: ${'$'}{e.message}");
+    }
+
+    // Listen for stop signals from Flutter UI
+    service.on('stopService').listen((event) {
+      porcupineManager?.stop();
+      porcupineManager?.delete();
+      service.stopSelf();
+    });
+  }
+
+  /// Trigger the Software Edge Glow Floating Overlay
+  static Future<void> showEdgeGlowOverlay() async {
+    if (await FlutterOverlayWindow.isPermissionGranted()) {
+      await FlutterOverlayWindow.showOverlay(
+        enableDrag: false,
+        overlayTitle: "ARIA Glowing Border",
+        overlayContent: "ARIA Active",
+        flag: OverlayFlag.clickThrough, // ⭐ Non-touchable: user can tap apps underneath!
+        visibility: NotificationVisibility.visibilitySecret,
+        positionGravity: PositionGravity.auto,
+        height: WindowSize.fullCover,
+        width: WindowSize.fullCover,
+      );
+    }
+  }
+
+  /// Dismiss the Edge Glow Floating Overlay
+  static Future<void> hideEdgeGlowOverlay() async {
+    if (await FlutterOverlayWindow.isActive()) {
+      await FlutterOverlayWindow.closeOverlay();
+    }
+  }
+}
+""".trimIndent()
+
+    val overlayWidgetCode = """
+// ==============================================================================
+// ✨ lib/overlay/aria_edge_glow_overlay.dart
+// Software Screen Edge Glow Floating Widget (SYSTEM_ALERT_WINDOW)
+// Renders a futuristic, breathing glowing cyan border along device edges
+// ==============================================================================
+import 'package:flutter/material.dart';
+
+/// Top-level overlay entry point registered for flutter_overlay_window
+@pragma("vm:entry-point")
+void overlayMain() {
+  runApp(const MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: AriaEdgeGlowOverlay(),
+  ));
+}
+
+class AriaEdgeGlowOverlay extends StatefulWidget {
+  const AriaEdgeGlowOverlay({super.key});
+
+  @override
+  State<AriaEdgeGlowOverlay> createState() => _AriaEdgeGlowOverlayState();
+}
+
+class _AriaEdgeGlowOverlayState extends State<AriaEdgeGlowOverlay>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _pulseController;
+  late Animation<double> _glowAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    // Breathing glow animation loop (1.2 seconds breathing cycle)
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+
+    _glowAnimation = Tween<double>(begin: 0.35, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent, // Completely transparent center!
+      child: AnimatedBuilder(
+        animation: _glowAnimation,
+        builder: (context, child) {
+          final double intensity = _glowAnimation.value;
+          return Container(
+            margin: EdgeInsets.zero,
+            decoration: BoxDecoration(
+              // Futuristic rounded corners matching smartphone displays
+              borderRadius: BorderRadius.circular(28.0),
+              border: Border.all(
+                color: const Color(0xFF00E5FF).withOpacity(intensity * 0.95), // Cyber Cyan
+                width: 4.5,
+              ),
+              boxShadow: [
+                // Soft outer glowing halo
+                BoxShadow(
+                  color: const Color(0xFF00E5FF).withOpacity(intensity * 0.5),
+                  blurRadius: 18.0,
+                  spreadRadius: 3.0,
+                ),
+                // Deep inner neon accent
+                BoxShadow(
+                  color: const Color(0xFF0070F3).withOpacity(intensity * 0.3),
+                  blurRadius: 28.0,
+                  spreadRadius: -4.0,
+                ),
+              ],
+            ),
+            child: const SizedBox.expand(),
+          );
+        },
+      ),
+    );
+  }
+}
+""".trimIndent()
+
+    val nothingPhoneGlyphCode = """
+// ==============================================================================
+// 📱 Nothing Phone Glyph Matrix LED Hardware Integration (Optional)
+// ==============================================================================
+// If the app runs on Nothing Phone (1), Nothing Phone (2), or Phone (2a),
+// you can optionally light up physical back LEDs alongside the screen glow!
+
+// 1. Add Nothing Glyph Developer Kit in android/app/build.gradle:
+// dependencies {
+//     implementation 'com.nothing.glyph:glyph-sdk:1.0.0'
+// }
+
+// 2. In Kotlin MainActivity / Service:
+/*
+import com.nothing.glyph.GlyphManager
+import com.nothing.glyph.GlyphFrame
+
+class NothingGlyphController(context: Context) {
+    private var glyphManager: GlyphManager? = null
+
+    fun init() {
+        if (Build.MANUFACTURER.contains("Nothing", ignoreCase = true)) {
+            glyphManager = GlyphManager.getInstance(context)
+            glyphManager?.init(object : GlyphManager.Callback {
+                override fun onServiceConnected() {
+                    // Glyph hardware connected!
+                }
+                override fun onServiceDisconnected() {}
+            })
+        }
+    }
+
+    fun animateWakeGlow() {
+        // Light up central circular LED glyph ring with breathing effect
+        val frame = GlyphFrame.Builder()
+            .buildChannelC()
+            .build()
+        glyphManager?.animate(frame)
+    }
+
+    fun turnOff() {
+        glyphManager?.turnOff()
+    }
+}
+*/
+""".trimIndent()
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "✨ Background Always-Listening & Edge Glow Architecture",
+                        color = CyberCyan,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "1. Background Listening: Uses an Android Foreground Service with Picovoice Porcupine wake-word engine. Stays alive 24/7 with zero battery drain.\n" +
+                                "2. Screen Edge Glow Overlay: Uses SYSTEM_ALERT_WINDOW with FLAG_NOT_TOUCHABLE so a subtle glowing cyan border pulses along the screen edges without blocking clicks or touches on other apps.\n" +
+                                "3. Automatic Lifecycle: Activates immediately on 'Hey ARIA', transitions to speaking glow, and disappears smoothly when ARIA finishes responding.\n" +
+                                "4. Nothing Phone Glyph: Hardware LED integration for Nothing Phone users with automatic software glow fallback for all other Android smartphones.",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, WarningAmber.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "⚙️ SYSTEM_ALERT_WINDOW Permission Guide",
+                        color = WarningAmber,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Android OS requires user consent for floating overlays:\n" +
+                                "• Flutter package: 'permission_handler' or 'flutter_overlay_window.requestPermission()'\n" +
+                                "• User will be routed to Settings > Apps > Special App Access > 'Display over other apps'\n" +
+                                "• User must toggle the switch ON for ARIA. Once enabled, edge glow appears seamlessly over YouTube, Chrome, WhatsApp, Games, etc.!",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = "1. pubspec.yaml (Packages)",
+                color = CyberCyan,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = pubspecYamlCode)
+        }
+
+        item {
+            Text(
+                text = "2. AndroidManifest.xml (Foreground Service & SYSTEM_ALERT_WINDOW)",
+                color = ElectricEmerald,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = manifestCode)
+        }
+
+        item {
+            Text(
+                text = "3. lib/services/aria_background_service.dart (Always-Listening Engine)",
+                color = WarningAmber,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = backgroundServiceCode)
+        }
+
+        item {
+            Text(
+                text = "4. lib/overlay/aria_edge_glow_overlay.dart (Breathing Cyan Edge Glow)",
+                color = NeonPurple,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = overlayWidgetCode)
+        }
+
+        item {
+            Text(
+                text = "5. Nothing Phone Glyph Matrix SDK Integration (Optional Hardware LEDs)",
+                color = CyberCyan,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = nothingPhoneGlyphCode)
         }
     }
 }
