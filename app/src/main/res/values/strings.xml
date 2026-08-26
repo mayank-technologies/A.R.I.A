@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">ARIA</string>
+    <string name="accessibility_service_description">ARIA Voice Assistant Accessibility Service enables automated voice gestures (scrolling shorts/reels, pausing/playing videos, and screen navigation) across apps using natural voice commands.</string>
 </resources>

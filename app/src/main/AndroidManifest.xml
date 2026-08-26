@@ -116,6 +116,20 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Accessibility Service for Voice-Driven Gestures (Scroll Reels/Shorts, Play/Pause Taps) -->
+        <service
+            android:name="com.example.assistant.accessibility.AriaAccessibilityGestureService"
+            android:label="A.R.I.A. Voice Gestures"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/aria_accessibility_service_config" />
+        </service>
     </application>
 
 </manifest>

@@ -31,6 +31,105 @@ class AriaCommandProcessor(
     suspend fun processCommand(userQuery: String): AriaCommandResult = withContext(Dispatchers.IO) {
         val queryLower = userQuery.lowercase(Locale.ROOT).trim()
 
+        // 0.4 Custom Routines ("Good Morning ARIA", "Good Night ARIA", "office jaana hai")
+        if (RoutineManager.isRoutineCommand(queryLower)) {
+            val routineMgr = RoutineManager(context, ariaDao)
+            val res = routineMgr.executeRoutine(userQuery, "Boss")
+            when (res) {
+                is RoutineResult.Success -> {
+                    saveHistory(userQuery, res.speechResponse, "ROUTINE")
+                    return@withContext AriaCommandResult.TextResponse(res.speechResponse, "ROUTINE")
+                }
+            }
+        }
+
+        // 0.42 Voice Gesture Automation ("scroll this reel", "pause this video", "next short", "play video")
+        if (queryLower.contains("scroll") || queryLower.contains("reel") || queryLower.contains("shorts") ||
+            queryLower.contains("pause this") || queryLower.contains("play this") || queryLower.contains("pause video") ||
+            queryLower.contains("play video") || queryLower.contains("video roko") || queryLower.contains("video chalao") ||
+            queryLower.contains("next video") || queryLower.contains("previous video") || queryLower.contains("double tap") ||
+            queryLower.contains("like this reel") || queryLower.contains("like this video")
+        ) {
+            val isEnabled = com.example.assistant.accessibility.AriaAccessibilityGestureService.checkAccessibilityEnabled(context) ||
+                    com.example.assistant.accessibility.AriaAccessibilityGestureService.isServiceRunning()
+
+            if (!isEnabled) {
+                val errMsg = "Boss, automated screen gestures ke liye ARIA ki Accessibility Service enable honi chahiye. Settings > Accessibility me jakar 'A.R.I.A. Voice Gestures' ko ON kijiye."
+                saveHistory(userQuery, errMsg, "GESTURE")
+                return@withContext AriaCommandResult.TextResponse(errMsg, "GESTURE")
+            }
+
+            if (queryLower.contains("previous") || queryLower.contains("pichli") || queryLower.contains("scroll up")) {
+                var responseText = "Pichli reel scroll kar di hai! 📱"
+                com.example.assistant.accessibility.AriaAccessibilityGestureService.scrollPreviousVideo { res ->
+                    if (res is com.example.assistant.accessibility.GestureResult.Failure) {
+                        responseText = res.message
+                    }
+                }
+                saveHistory(userQuery, responseText, "GESTURE")
+                return@withContext AriaCommandResult.TextResponse(responseText, "GESTURE")
+            } else if (queryLower.contains("pause") || queryLower.contains("play") || queryLower.contains("resume") ||
+                queryLower.contains("roko") || queryLower.contains("chalao") || queryLower.contains("toggle")
+            ) {
+                var responseText = "Video play/pause toggle kar diya hai! ⏯️"
+                com.example.assistant.accessibility.AriaAccessibilityGestureService.togglePlayPauseVideo { res ->
+                    if (res is com.example.assistant.accessibility.GestureResult.Failure) {
+                        responseText = res.message
+                    }
+                }
+                saveHistory(userQuery, responseText, "GESTURE")
+                return@withContext AriaCommandResult.TextResponse(responseText, "GESTURE")
+            } else if (queryLower.contains("like") || queryLower.contains("double tap")) {
+                var responseText = "Video like (double tap) kar diya hai! ❤️"
+                com.example.assistant.accessibility.AriaAccessibilityGestureService.doubleTapLikeVideo { res ->
+                    if (res is com.example.assistant.accessibility.GestureResult.Failure) {
+                        responseText = res.message
+                    }
+                }
+                saveHistory(userQuery, responseText, "GESTURE")
+                return@withContext AriaCommandResult.TextResponse(responseText, "GESTURE")
+            } else if (queryLower.contains("scroll") || queryLower.contains("next") || queryLower.contains("agla") || queryLower.contains("badlo")) {
+                var responseText = "Shorts/Reels scroll kar diya hai! 📱✨"
+                com.example.assistant.accessibility.AriaAccessibilityGestureService.scrollNextVideo { res ->
+                    if (res is com.example.assistant.accessibility.GestureResult.Failure) {
+                        responseText = res.message
+                    }
+                }
+                saveHistory(userQuery, responseText, "GESTURE")
+                return@withContext AriaCommandResult.TextResponse(responseText, "GESTURE")
+            }
+        }
+
+        // 0.45 Alarm & Timer Commands ("7 baje ka alarm set karo", "10 minute ka timer lagao", "cancel alarm")
+        if (AlarmTimerVoiceHandler.isAlarmTimerCommand(queryLower)) {
+            val alarmResult = AlarmTimerVoiceHandler.processCommand(context, userQuery)
+            when (alarmResult) {
+                is AlarmTimerResult.Success -> {
+                    saveHistory(userQuery, alarmResult.message, "ALARM_TIMER")
+                    return@withContext AriaCommandResult.TextResponse(alarmResult.message, "ALARM_TIMER")
+                }
+                is AlarmTimerResult.Failure -> {
+                    saveHistory(userQuery, alarmResult.message, "ALARM_TIMER")
+                    return@withContext AriaCommandResult.TextResponse(alarmResult.message, "ALARM_TIMER")
+                }
+            }
+        }
+
+        // 0.46 Mood-Based Music Suggestion ("mood chill hai gaana bajao", "sad songs", "gym workout music")
+        if (MusicMoodVoiceHandler.isMusicMoodCommand(queryLower)) {
+            val moodRes = MusicMoodVoiceHandler.processCommand(context, userQuery)
+            when (moodRes) {
+                is MusicMoodResult.Success -> {
+                    saveHistory(userQuery, moodRes.message, "MUSIC")
+                    return@withContext AriaCommandResult.TextResponse(moodRes.message, "MUSIC", openUrl = moodRes.openUrl)
+                }
+                is MusicMoodResult.Failure -> {
+                    saveHistory(userQuery, moodRes.message, "MUSIC")
+                    return@withContext AriaCommandResult.TextResponse(moodRes.message, "MUSIC")
+                }
+            }
+        }
+
         // 0.5 Morning Briefing & Daily Summary command
         if (queryLower.contains("good morning") || queryLower.contains("briefing") ||
             queryLower.contains("daily summary") || queryLower.contains("morning update") ||

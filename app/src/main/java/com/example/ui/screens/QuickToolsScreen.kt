@@ -84,6 +84,13 @@ import com.example.assistant.glyph.AriaGlyphHardwareManager
 import com.example.assistant.overlay.AriaEdgeGlowOverlayManager
 import com.example.assistant.overlay.AriaEdgeGlowView
 import com.example.assistant.screenshare.AriaScreenShareManager
+import com.example.assistant.accessibility.AriaAccessibilityGestureService
+import com.example.assistant.accessibility.GestureResult
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.filled.KeyboardDoubleArrowUp
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.LightMode
@@ -102,11 +109,13 @@ fun QuickToolsScreen(
     val isBackgroundWakeRunning by AriaBackgroundWakeService.isRunning.collectAsState()
     val isGlowActive by AriaEdgeGlowOverlayManager.isGlowActive.collectAsState()
     val isNothingPhone by AriaGlyphHardwareManager.isNothingPhone.collectAsState()
+    val isAccessibilityActive by AriaAccessibilityGestureService.isServiceEnabled.collectAsState()
 
     var showDeveloperHubDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
     var showOverlayPermissionDialog by remember { mutableStateOf(false) }
     var showIosInfoDialog by remember { mutableStateOf(false) }
+    var showAccessibilityOnboardingDialog by remember { mutableStateOf(false) }
 
     var editNameText by remember(userName) { mutableStateOf(userName) }
     var weatherCity by remember { mutableStateOf("Delhi") }
@@ -221,6 +230,80 @@ fun QuickToolsScreen(
                         modifier = Modifier.align(Alignment.End)
                     ) {
                         Text("Understood", color = DeepSpace, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAccessibilityOnboardingDialog) {
+        Dialog(onDismissRequest = { showAccessibilityOnboardingDialog = false }) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(20.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan)
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .background(CyberCyan.copy(alpha = 0.2f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.TouchApp,
+                            contentDescription = "Accessibility",
+                            tint = CyberCyan,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Voice Gestures & Accessibility",
+                        color = CyberCyan,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "⚡ What this enables:\n" +
+                                "• Say 'scroll this reel/shorts' or 'next video' to swipe up automatically in YouTube Shorts, Instagram Reels, TikTok.\n" +
+                                "• Say 'pause this video' or 'play video' to tap and toggle playback in any media app.\n" +
+                                "• Say 'like this reel' for hands-free double tap.\n\n" +
+                                "🔒 Privacy & Transparency:\n" +
+                                "• Runs 100% on-device using Android's standard Gesture Dispatch API.\n" +
+                                "• ARIA NEVER records your passwords, keystrokes, personal chats, or screen contents.\n\n" +
+                                "🍎 iOS Note:\n" +
+                                "• This system-wide gesture automation is EXCLUSIVE to Android. iOS Apple sandbox policy strictly blocks third-party automated gestures.",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { showAccessibilityOnboardingDialog = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceVariantDark),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Dismiss", color = TextSecondary, fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = {
+                                showAccessibilityOnboardingDialog = false
+                                AriaAccessibilityGestureService.openAccessibilitySettings(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
+                            modifier = Modifier.weight(1.3f)
+                        ) {
+                            Text("Open Settings", color = DeepSpace, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -646,6 +729,166 @@ fun QuickToolsScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Voice Gesture Automation (Accessibility Service) Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(20.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isAccessibilityActive) ElectricEmerald else CyberCyan.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(
+                                    if (isAccessibilityActive) ElectricEmerald.copy(alpha = 0.2f)
+                                    else CyberCyan.copy(alpha = 0.15f),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TouchApp,
+                                contentDescription = "Voice Gestures",
+                                tint = if (isAccessibilityActive) ElectricEmerald else CyberCyan,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Voice Screen Gestures",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (isAccessibilityActive) ElectricEmerald.copy(alpha = 0.2f) else WarningAmber.copy(alpha = 0.2f),
+                                            RoundedCornerShape(6.dp)
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isAccessibilityActive) "Active" else "Action Needed",
+                                        color = if (isAccessibilityActive) ElectricEmerald else WarningAmber,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Automated Reels scroll & Video play/pause gestures",
+                                color = TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        IconButton(onClick = { showAccessibilityOnboardingDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Accessibility Info",
+                                tint = CyberCyan
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "Say 'scroll this reel/shorts' or 'pause this video' over YouTube, Instagram, etc. to dispatch simulated swipe/tap gestures hands-free!",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                if (!AriaAccessibilityGestureService.isServiceRunning() && !AriaAccessibilityGestureService.checkAccessibilityEnabled(context)) {
+                                    showAccessibilityOnboardingDialog = true
+                                } else {
+                                    AriaAccessibilityGestureService.scrollNextVideo { res ->
+                                        when (res) {
+                                            is GestureResult.Success -> Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                            is GestureResult.Failure -> Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardDoubleArrowUp,
+                                contentDescription = "Swipe Up",
+                                tint = DeepSpace,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Test Scroll", color = DeepSpace, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                if (!AriaAccessibilityGestureService.isServiceRunning() && !AriaAccessibilityGestureService.checkAccessibilityEnabled(context)) {
+                                    showAccessibilityOnboardingDialog = true
+                                } else {
+                                    AriaAccessibilityGestureService.togglePlayPauseVideo { res ->
+                                        when (res) {
+                                            is GestureResult.Success -> Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                            is GestureResult.Failure -> Toast.makeText(context, res.message, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricEmerald),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Tap Center",
+                                tint = DeepSpace,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Test Pause", color = DeepSpace, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                AriaAccessibilityGestureService.openAccessibilitySettings(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan)
+                        ) {
+                            Text("Settings", color = CyberCyan, fontSize = 11.sp)
                         }
                     }
                 }

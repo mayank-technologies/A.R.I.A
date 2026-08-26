@@ -64,6 +64,10 @@ fun PythonTutorialHubScreen(modifier: Modifier = Modifier) {
         "🐍 Python ARIA Code",
         "🎯 Wake Word & Personality",
         "✨ Edge Glow & Background Overlay",
+        "🖐️ Voice Gestures & Accessibility",
+        "⏰ Alarms, Timers & Routines",
+        "✉️ Gmail, News & Sports API",
+        "🌐 Translate, Music & WhatsApp",
         "📡 Mobile Backend Sync",
         "👋 Flutter Onboarding",
         "⚡ Flutter Wake Word",
@@ -149,11 +153,15 @@ fun PythonTutorialHubScreen(modifier: Modifier = Modifier) {
             1 -> PythonCodeView(context)
             2 -> WakeWordAndPersonalityGuideView(context)
             3 -> FlutterEdgeGlowAndBackgroundWakeGuideView(context)
-            4 -> MobileSyncArchitectureView(context)
-            5 -> FlutterOnboardingGuideView(context)
-            6 -> FlutterWakeWordGuideView(context)
-            7 -> FlutterWeatherWorkManagerGuideView(context)
-            8 -> FlutterCalendarRemindersGuideView(context)
+            4 -> FlutterAccessibilityVoiceGesturesGuideView(context)
+            5 -> FlutterAlarmsTimersAndRoutinesGuideView(context)
+            6 -> FlutterGmailNewsAndSportsGuideView(context)
+            7 -> FlutterTranslateMusicAndWhatsAppGuideView(context)
+            8 -> MobileSyncArchitectureView(context)
+            9 -> FlutterOnboardingGuideView(context)
+            10 -> FlutterWakeWordGuideView(context)
+            11 -> FlutterWeatherWorkManagerGuideView(context)
+            12 -> FlutterCalendarRemindersGuideView(context)
         }
     }
 }
@@ -2250,6 +2258,1076 @@ class NothingGlyphController(context: Context) {
 }
 
 @Composable
+fun FlutterAlarmsTimersAndRoutinesGuideView(context: Context) {
+    val pubspecAlarmCode = """
+# ==============================================================================
+# 📦 pubspec.yaml (Alarm, Timer, Notifications & Routine Manager)
+# ==============================================================================
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_local_notifications: ^17.1.2   # Scheduled alarms, ringtones & full-screen intent
+  android_alarm_manager_plus: ^3.0.4     # Exact device alarms even when phone is asleep
+  audioplayers: ^6.0.0                   # Loud alarm buzzer & sound effects
+  flutter_tts: ^4.0.2                    # Text To Speech for voice alarms
+  intl: ^0.19.0                          # Time & Date formatting
+  shared_preferences: ^2.2.2             # Routine states & persistent settings
+""".trimIndent()
+
+    val alarmParserCode = """
+// ==============================================================================
+// ⏰ lib/services/aria_alarm_timer_service.dart
+// Natural Language Time Parser & Android Alarm / Timer Manager
+// Handles "7 baje ka alarm", "10 minute ka timer", "cancel alarm"
+// ==============================================================================
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+
+class AriaAlarmTimerService {
+  static final FlutterLocalNotificationsPlugin _notificationsPlugin =
+      FlutterLocalNotificationsPlugin();
+  static final FlutterTts _tts = FlutterTts();
+
+  /// Initialize notifications & timezones
+  static Future<void> init() async {
+    tz.initializeTimeZones();
+
+    const AndroidInitializationSettings androidSettings =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    const InitializationSettings initSettings =
+        InitializationSettings(android: androidSettings);
+
+    await _notificationsPlugin.initialize(
+      initSettings,
+      onDidReceiveNotificationResponse: (details) {
+        print("Alarm notification clicked: ${'$'}{details.payload}");
+      },
+    );
+  }
+
+  /// Master Natural Language Parser for Voice Queries
+  static Future<String> processVoiceCommand(String query) async {
+    final q = query.toLowerCase().trim();
+
+    if (q.contains('cancel') || q.contains('hatao') || q.contains('dismiss') || q.contains('band karo')) {
+      await _notificationsPlugin.cancelAll();
+      return "Boss, saare active alarms aur timers cancel kar diye gaye hain!";
+    }
+
+    if (q.contains('timer')) {
+      return await _handleTimer(q);
+    } else {
+      return await _handleAlarm(q);
+    }
+  }
+
+  /// Parse & schedule Timer (e.g., "10 minute ka timer", "30 second timer")
+  static Future<String> _handleTimer(String q) async {
+    int totalSeconds = 0;
+
+    // Check minutes
+    final minMatch = RegExp(r'(\d+)\s*(?:minute|min|minutes|minto)').firstMatch(q);
+    if (minMatch != null) {
+      totalSeconds += (int.tryParse(minMatch.group(1) ?? '0') ?? 0) * 60;
+    }
+
+    // Check hours
+    final hrMatch = RegExp(r'(\d+)\s*(?:hour|hours|hr|ghanta|ghante)').firstMatch(q);
+    if (hrMatch != null) {
+      totalSeconds += (int.tryParse(hrMatch.group(1) ?? '0') ?? 0) * 3600;
+    }
+
+    // Check seconds
+    final secMatch = RegExp(r'(\d+)\s*(?:second|sec|seconds)').firstMatch(q);
+    if (secMatch != null) {
+      totalSeconds += (int.tryParse(secMatch.group(1) ?? '0') ?? 0);
+    }
+
+    // Fallback default
+    if (totalSeconds == 0) {
+      final numMatch = RegExp(r'(\d+)').firstMatch(q);
+      final num = int.tryParse(numMatch?.group(1) ?? '5') ?? 5;
+      totalSeconds = num * 60;
+    }
+
+    final duration = Duration(seconds: totalSeconds);
+    final targetTime = DateTime.now().add(duration);
+
+    // Schedule notification
+    await _notificationsPlugin.zonedSchedule(
+      991,
+      '⏱️ ARIA Timer Finished!',
+      'Boss, aapka ${'$'}{totalSeconds ~/ 60} minute ka timer poora ho gaya hai!',
+      tz.TZDateTime.from(targetTime, tz.local),
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'aria_timer_channel',
+          'ARIA Timers',
+          channelDescription: 'High priority loud timer sound',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          sound: RawResourceAndroidNotificationSound('alarm_loud'),
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
+
+    // Voice announcement when timer fires in background
+    Timer(duration, () async {
+      await _tts.speak("Alarm! Time ho gaya hai Boss. Aapka timer complete ho chuka hai.");
+    });
+
+    return "Boss, ${'$'}{totalSeconds ~/ 60} minute ka timer set kar diya hai! ⏱️";
+  }
+
+  /// Parse & schedule Alarm (e.g., "7 baje ka alarm", "sham 5 baje", "6:30 am")
+  static Future<String> _handleAlarm(String q) async {
+    int hour = 7;
+    int minute = 0;
+    bool isPm = q.contains('sham') || q.contains('shaam') || q.contains('raat') ||
+        q.contains('pm') || q.contains('dopahar');
+
+    final timeColonMatch = RegExp(r'(\d{1,2}):(\d{2})').firstMatch(q);
+    if (timeColonMatch != null) {
+      hour = int.tryParse(timeColonMatch.group(1) ?? '7') ?? 7;
+      minute = int.tryParse(timeColonMatch.group(2) ?? '0') ?? 0;
+    } else {
+      final bajeMatch = RegExp(r'(\d{1,2})\s*(?:baje|am|pm|o\'clock)?').firstMatch(q);
+      if (bajeMatch != null) {
+        hour = int.tryParse(bajeMatch.group(1) ?? '7') ?? 7;
+      }
+    }
+
+    if (isPm && hour < 12) hour += 12;
+    if (!isPm && (q.contains('subah') || q.contains('am')) && hour == 12) hour = 0;
+
+    final now = DateTime.now();
+    var scheduledDate = DateTime(now.year, now.month, now.day, hour, minute);
+    if (scheduledDate.isBefore(now)) {
+      scheduledDate = scheduledDate.add(const Duration(days: 1));
+    }
+
+    await _notificationsPlugin.zonedSchedule(
+      992,
+      '⏰ ARIA Alarm: Wake Up!',
+      'Boss, ${'$'}hour:${'$'}{minute.toString().padLeft(2, '0')} ho gaye hain!',
+      tz.TZDateTime.from(scheduledDate, tz.local),
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'aria_alarm_channel',
+          'ARIA Alarms',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          fullScreenIntent: true,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
+
+    final displayTime = "${'$'}{hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour)}:${'$'}{minute.toString().padLeft(2, '0')} ${'$'}{hour >= 12 ? 'PM' : 'AM'}";
+    return "Ji Boss! Kal subah ya aaj ${'$'}displayTime ka loud alarm set kar diya hai. ⏰";
+  }
+}
+""".trimIndent()
+
+    val routineManagerCode = """
+// ==============================================================================
+// 🌅 lib/services/routine_manager.dart
+// Custom Routines: Good Morning & Good Night Automations
+// ==============================================================================
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+
+enum AriaSystemState { active, standby, sleep }
+
+class RoutineManager {
+  static final FlutterTts _tts = FlutterTts();
+  static final ValueNotifier<AriaSystemState> systemStateNotifier =
+      ValueNotifier(AriaSystemState.active);
+
+  /// Check if voice query is a custom routine
+  static bool isRoutineCommand(String q) {
+    final lower = q.toLowerCase();
+    return lower.contains('good morning') ||
+        lower.contains('good night') ||
+        lower.contains('subah ho gayi') ||
+        lower.contains('shubh ratri') ||
+        lower.contains('so jao') ||
+        lower.contains('office jaana hai');
+  }
+
+  /// Execute routine pipeline
+  static Future<String> executeRoutine(String q, {
+    required Future<String> Function() getWeather,
+    required Future<List<String>> Function() getReminders,
+    required Future<List<String>> Function() getTopNews,
+    required VoidCallback onPauseBackgroundListening,
+    required VoidCallback onResumeBackgroundListening,
+  }) async {
+    final lower = q.toLowerCase();
+
+    if (lower.contains('good night') || lower.contains('shubh ratri') || lower.contains('so jao')) {
+      // =======================================================
+      // 🌙 GOOD NIGHT ROUTINE
+      // =======================================================
+      systemStateNotifier.value = AriaSystemState.standby;
+
+      // 1. Pause continuous mic service to save overnight battery
+      onPauseBackgroundListening();
+
+      // 2. Short peaceful farewell
+      const farewell = "Good night, Boss! Main standby mode me switch ho rahi hoon taaki aapki phone battery bachi rahe. Sound sleep lijiye! 🌙✨";
+      await _tts.speak(farewell);
+      return farewell;
+    } else {
+      // =======================================================
+      // ☀️ GOOD MORNING ROUTINE
+      // =======================================================
+      systemStateNotifier.value = AriaSystemState.active;
+      onResumeBackgroundListening();
+
+      // Aggregate: Weather + Reminders + Top News
+      final weather = await getWeather();
+      final reminders = await getReminders();
+      final news = await getTopNews();
+
+      final buffer = StringBuffer();
+      buffer.writeln("Good morning, Boss! ☀️ ARIA is online and ready.\n");
+      buffer.writeln("🌤️ Weather: ${'$'}weather\n");
+
+      if (reminders.isNotEmpty) {
+        buffer.writeln("📌 Aaj ke Reminders (${'$'}{reminders.length}):");
+        for (var r in reminders.take(3)) {
+          buffer.writeln("• ${'$'}r");
+        }
+        buffer.writeln("");
+      } else {
+        buffer.writeln("📌 Reminders: Aaj koi pending tasks nahi hain. All clear!\n");
+      }
+
+      if (news.isNotEmpty) {
+        buffer.writeln("📰 Top Headlines:");
+        for (var n in news.take(2)) {
+          buffer.writeln("• ${'$'}n");
+        }
+      }
+
+      buffer.writeln("\nAapka din shubh aur productive rahe!");
+      final response = buffer.toString();
+      await _tts.speak(response);
+      return response;
+    }
+  }
+}
+""".trimIndent()
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "⏰ Alarms, Timers & Custom Routines Pipeline",
+                        color = CyberCyan,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "1. Natural Language Time Parsing: Converts Hindi/English phrases ('7 baje', '10 minute', 'sham 5:30') into exact timestamps.\n" +
+                                "2. Exact Scheduled Alarms: Uses flutter_local_notifications + Android AlarmManager for loud ringtones & full-screen wakeup.\n" +
+                                "3. Custom Routines (RoutineManager):\n" +
+                                "   • 'Good Morning ARIA' -> Switches UI to ONLINE, aggregates Weather + Reminders + News briefing.\n" +
+                                "   • 'Good Night ARIA' -> Switches UI to STANDBY, pauses background mic to conserve battery overnight.",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = "1. pubspec.yaml Dependencies",
+                color = CyberCyan,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = pubspecAlarmCode)
+        }
+
+        item {
+            Text(
+                text = "2. lib/services/aria_alarm_timer_service.dart (Natural Language Alarms)",
+                color = ElectricEmerald,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = alarmParserCode)
+        }
+
+        item {
+            Text(
+                text = "3. lib/services/routine_manager.dart (Good Morning / Good Night Engine)",
+                color = WarningAmber,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = routineManagerCode)
+        }
+    }
+}
+
+@Composable
+fun FlutterGmailNewsAndSportsGuideView(context: Context) {
+    val pubspecCode = """
+# ==============================================================================
+# 📦 pubspec.yaml (Gmail OAuth2, News API & Cricket Sports API)
+# ==============================================================================
+dependencies:
+  flutter:
+    sdk: flutter
+  google_sign_in: ^6.2.1               # Secure OAuth2 Login with Google
+  extension_google_sign_in_as_googleapis_auth: ^2.0.12 # Auth bridge for Google APIs
+  googleapis: ^13.2.0                  # Official Google Gmail API Client (Read-Only)
+  http: ^1.2.0                         # REST API requests for News & Cricket
+  flutter_tts: ^4.0.2                  # Voice feedback
+""".trimIndent()
+
+    val gmailServiceCode = """
+// ==============================================================================
+// ✉️ lib/services/aria_gmail_service.dart
+// Read-Only Gmail API Integration (Google Sign-In + OAuth2)
+// Voice Command: "ARIA, mera email check karo"
+// ==============================================================================
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:googleapis/gmail/v1.dart' as gmail;
+import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
+
+class AriaGmailService {
+  // ⭐ Privacy Note: Only request READ-ONLY scope (never request delete/send scopes)
+  static final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: [
+      gmail.GmailApi.gmailReadonlyScope,
+    ],
+  );
+
+  /// Sign In with Google & Fetch 3 Recent Unread Emails
+  static Future<String> checkRecentEmails() async {
+    try {
+      final GoogleSignInAccount? account = await _googleSignIn.signIn();
+      if (account == null) {
+        return "Boss, Gmail access karne ke liye Google Sign-in cancel ho gaya.";
+      }
+
+      final httpClient = await _googleSignIn.authenticatedClient();
+      if (httpClient == null) {
+        return "Authentication error: Google account connect nahi ho saka.";
+      }
+
+      final gmailApi = gmail.GmailApi(httpClient);
+
+      // Fetch unread inbox messages
+      final listRes = await gmailApi.users.messages.list(
+        'me',
+        q: 'is:unread category:primary',
+        maxResults: 3,
+      );
+
+      final messages = listRes.messages;
+      if (messages == null || messages.isEmpty) {
+        return "Boss, aapke primary inbox me koi naya unread email nahi hai. All clear! ✉️";
+      }
+
+      final buffer = StringBuffer();
+      buffer.writeln("Boss, aapke paas ${'$'}{messages.length} naye unread emails hain:\n");
+
+      for (var i = 0; i < messages.length; i++) {
+        final msg = await gmailApi.users.messages.get('me', messages[i].id!, format: 'full');
+        final headers = msg.payload?.headers ?? [];
+
+        String subject = "No Subject";
+        String sender = "Unknown Sender";
+
+        for (var h in headers) {
+          if (h.name?.toLowerCase() == 'subject') subject = h.value ?? subject;
+          if (h.name?.toLowerCase() == 'from') sender = h.value?.split('<').first.trim() ?? sender;
+        }
+
+        final snippet = msg.snippet ?? "";
+        buffer.writeln("${'$'}{i + 1}. Sender: ${'$'}sender");
+        buffer.writeln("   Subject: ${'$'}subject");
+        if (snippet.isNotEmpty) {
+          buffer.writeln("   Preview: ${'$'}{snippet.length > 80 ? snippet.substring(0, 80) + '...' : snippet}\n");
+        }
+      }
+
+      return buffer.toString();
+    } catch (e) {
+      return "Gmail fetch karne me dikkat aayi: ${'$'}{e.toString()}";
+    }
+  }
+}
+""".trimIndent()
+
+    val newsAndSportsCode = """
+// ==============================================================================
+// 📰 lib/services/aria_news_and_sports_service.dart
+// Live News Briefing (GNews / NewsAPI) & Live Cricket Scores (CricAPI)
+// ==============================================================================
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+class AriaNewsAndSportsService {
+  // 1. News API (Free Tier: GNews.io gives 100 requests/day free)
+  static const String _gnewsApiKey = "YOUR_FREE_GNEWS_API_KEY";
+
+  // 2. Cricket API (Free Tier: CricAPI gives 100 hits/day free)
+  static const String _cricApiKey = "YOUR_FREE_CRICAPI_KEY";
+
+  /// Voice command: "ARIA, aaj ki news sunao"
+  static Future<String> getTodayTopNews({String country = 'in'}) async {
+    try {
+      final url = Uri.parse(
+          'https://gnews.io/api/v4/top-headlines?category=general&lang=en&country=${'$'}country&max=4&apikey=${'$'}_gnewsApiKey');
+
+      final response = await http.get(url).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final articles = data['articles'] as List?;
+
+        if (articles == null || articles.isEmpty) {
+          return "Boss, abhi headlines available nahi hain.";
+        }
+
+        final buffer = StringBuffer();
+        buffer.writeln("📰 Aaj ki Top Headlines:\n");
+
+        for (var i = 0; i < articles.length; i++) {
+          final title = articles[i]['title'] ?? "News Headline";
+          final source = articles[i]['source']?['name'] ?? "News";
+          buffer.writeln("${'$'}{i + 1}. ${'$'}title (${'$'}source)");
+        }
+
+        return buffer.toString();
+      } else {
+        return "News server se connect nahi ho saka. (Status: ${'$'}{response.statusCode})";
+      }
+    } catch (e) {
+      return "Internet connection check kijiye news fetch karne ke liye.";
+    }
+  }
+
+  /// Voice command: "ARIA, India ka cricket score kya hai"
+  static Future<String> getLiveCricketScore() async {
+    try {
+      final url = Uri.parse(
+          'https://api.cricapi.com/v1/currentMatches?apikey=${'$'}_cricApiKey&offset=0');
+
+      final response = await http.get(url).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final matches = data['data'] as List?;
+
+        if (matches == null || matches.isEmpty) {
+          return "Boss, abhi koi major live match active nahi hai. Recent matches check kar sakti hu!";
+        }
+
+        // Find India match or any live match
+        final indiaMatch = matches.firstWhere(
+          (m) => (m['name'] ?? '').toString().toLowerCase().contains('india'),
+          orElse: () => matches.first,
+        );
+
+        final matchName = indiaMatch['name'] ?? "Cricket Match";
+        final status = indiaMatch['status'] ?? "Match in progress";
+        final score = indiaMatch['score'] != null
+            ? (indiaMatch['score'] as List).map((s) => "${'$'}{s['inning']}: ${'$'}{s['r']}/${'$'}{s['w']} (${'$'}{s['o']} ov)").join(' | ')
+            : "Scores updating...";
+
+        return "🏏 Match: ${'$'}matchName\nScore: ${'$'}score\nStatus: ${'$'}status";
+      } else {
+        return "Cricket API response pending hai.";
+      }
+    } catch (e) {
+      return "Score fetch karte waqt network issue aaya, Boss.";
+    }
+  }
+}
+""".trimIndent()
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "✉️ Gmail, News & Sports Architecture",
+                        color = CyberCyan,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "1. Gmail API (OAuth2): Uses google_sign_in with read-only scope (gmail.readonly). Summarizes top unread inbox senders and previews safely.\n" +
+                                "2. GNews / NewsAPI: Fetches top headlines for India/world with short summaries.\n" +
+                                "3. CricAPI: Fetches live match ball-by-ball scorelines and match summaries for 'India ka score kya hai'.\n" +
+                                "4. Free Tier Notice: Gmail API is 100% free with generous quotas. GNews (100 req/day) & CricAPI (100 req/day) provide free tiers.",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = "1. pubspec.yaml",
+                color = CyberCyan,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = pubspecCode)
+        }
+
+        item {
+            Text(
+                text = "2. lib/services/aria_gmail_service.dart (Read-Only Inbox Summary)",
+                color = ElectricEmerald,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = gmailServiceCode)
+        }
+
+        item {
+            Text(
+                text = "3. lib/services/aria_news_and_sports_service.dart (News & Cricket Scores)",
+                color = WarningAmber,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = newsAndSportsCode)
+        }
+    }
+}
+
+@Composable
+fun FlutterTranslateMusicAndWhatsAppGuideView(context: Context) {
+    val translateMusicCode = """
+// ==============================================================================
+// 🌐 lib/services/aria_translate_and_music_service.dart
+// 1. Language Translator (Hindi <-> English + 100+ languages)
+// 2. Mood-Based Music Suggestion (Spotify URI + YouTube Music Fallback)
+// 3. WhatsApp Status Limitations & Deep-linking
+// ==============================================================================
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_tts/flutter_tts.dart';
+
+class AriaTranslateAndMusicService {
+  static final FlutterTts _tts = FlutterTts();
+
+  // ===========================================================================
+  // 1. 🌐 LANGUAGE TRANSLATOR
+  // Voice Command: "ARIA, 'good morning' ko hindi mein translate karo"
+  // ===========================================================================
+  static Future<String> translateText(String text, {String targetLang = 'hi'}) async {
+    try {
+      // Free Google Translate Endpoint
+      final url = Uri.parse(
+          'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${'$'}targetLang&dt=t&q=${'$'}{Uri.encodeComponent(text)}');
+
+      final response = await http.get(url).timeout(const Duration(seconds: 6));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final translated = data[0][0][0].toString();
+
+        // Voice output
+        if (targetLang == 'hi') {
+          await _tts.setLanguage("hi-IN");
+        }
+        await _tts.speak(translated);
+
+        return "Translation: \"${'$'}translated\"";
+      } else {
+        return "Translation server unreachable.";
+      }
+    } catch (e) {
+      return "Translation failed: ${'$'}{e.toString()}";
+    }
+  }
+
+  // ===========================================================================
+  // 2. 🎵 MOOD-BASED MUSIC SUGGESTION
+  // Voice Command: "ARIA, mera mood chill hai, gaana suggest karo"
+  // ===========================================================================
+  static Future<String> playMoodMusic(String voiceQuery) async {
+    final q = voiceQuery.toLowerCase();
+
+    String mood = "Chill";
+    String queryKeyword = "chill lofi relaxing songs";
+
+    if (q.contains('sad') || q.contains('dard') || q.contains('udas')) {
+      mood = "Melancholic / Sad";
+      queryKeyword = "emotional soulful sad hindi acoustic songs";
+    } else if (q.contains('romantic') || q.contains('love') || q.contains('pyaar')) {
+      mood = "Romantic";
+      queryKeyword = "best romantic hindi love songs";
+    } else if (q.contains('gym') || q.contains('workout') || q.contains('energetic') || q.contains('josh')) {
+      mood = "High Energy";
+      queryKeyword = "high energy gym workout booster songs";
+    } else if (q.contains('party') || q.contains('dance')) {
+      mood = "Party";
+      queryKeyword = "nonstop party dance club tracks";
+    }
+
+    // 1. Try launching Spotify URI scheme (spotify:search:<query>)
+    final spotifyUri = Uri.parse("spotify:search:${'$'}{Uri.encodeComponent(queryKeyword)}");
+    if (await canLaunchUrl(spotifyUri)) {
+      await launchUrl(spotifyUri, mode: LaunchMode.externalApplication);
+      return "Boss, aapke ${'$'}mood mood ke liye Spotify playlist open kar di hai! 🎵";
+    }
+
+    // 2. Fallback to YouTube Music Search
+    final ytUri = Uri.parse("https://www.youtube.com/results?search_query=${'$'}{Uri.encodeComponent(queryKeyword)}");
+    await launchUrl(ytUri, mode: LaunchMode.externalApplication);
+    return "Aapke ${'$'}mood mood ke gaane YouTube Music par load kar diye hain! 🎶";
+  }
+
+  // ===========================================================================
+  // 3. 💬 WHATSAPP STATUS LIMITATION & REALISTIC BEHAVIOR
+  // ===========================================================================
+  // ⚠️ CRITICAL LIMITATION:
+  // WhatsApp DOES NOT provide any public API or deep link to programmatically
+  // view contacts' status updates. Direct in-app status rendering is forbidden
+  // by WhatsApp end-to-end encryption.
+  //
+  // Realistic Implementation:
+  // ARIA informs the user politely and immediately opens WhatsApp directly
+  // so the user can view the Status tab with a single tap.
+  // ===========================================================================
+  static Future<String> openWhatsAppStatusTab() async {
+    final whatsappUri = Uri.parse("whatsapp://");
+    final playStoreUri = Uri.parse("https://play.google.com/store/apps/details?id=com.whatsapp");
+
+    if (await canLaunchUrl(whatsappUri)) {
+      await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
+      return "Status dekhne ke liye WhatsApp khol rahi hoon, Boss! Status tab par tap kijiye. 💬";
+    } else {
+      await launchUrl(playStoreUri, mode: LaunchMode.externalApplication);
+      return "WhatsApp app install nahi hai.";
+    }
+  }
+}
+""".trimIndent()
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "🌐 Translation, Mood Music & WhatsApp Deep-linking",
+                        color = CyberCyan,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "1. Translation Engine: Auto-detects language and translates to Hindi / English / Spanish with instant TTS pronunciation.\n" +
+                                "2. Mood-Based Music: Intelligently parses emotional state (chill, sad, energetic, romantic, party) and opens curated Spotify / YouTube playlists.\n" +
+                                "3. WhatsApp Status Reality: Explains WhatsApp's privacy architecture transparently and launches WhatsApp gracefully.",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = "1. lib/services/aria_translate_and_music_service.dart",
+                color = ElectricEmerald,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = translateMusicCode)
+        }
+    }
+}
+
+@Composable
+fun FlutterAccessibilityVoiceGesturesGuideView(context: Context) {
+    val configXmlCode = """
+<!-- ===========================================================================
+     📂 android/app/src/main/res/xml/aria_accessibility_service_config.xml
+     Accessibility Service Capabilities Declaration
+     =========================================================================== -->
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="100" />
+""".trimIndent()
+
+    val manifestXmlCode = """
+<!-- ===========================================================================
+     📂 android/app/src/main/AndroidManifest.xml
+     Registering the Accessibility Service with BIND_ACCESSIBILITY_SERVICE
+     =========================================================================== -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application ...>
+        
+        <!-- ARIA Voice Gestures Accessibility Service -->
+        <service
+            android:name=".AriaAccessibilityGestureService"
+            android:label="A.R.I.A. Voice Gestures"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/aria_accessibility_service_config" />
+        </service>
+
+    </application>
+</manifest>
+""".trimIndent()
+
+    val nativeKotlinCode = """
+// =============================================================================
+// 🤖 android/app/src/main/kotlin/.../AriaAccessibilityGestureService.kt
+// Native Android AccessibilityService that simulates Swipes and Taps
+// =============================================================================
+package com.example.aria
+
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.content.Context
+import android.content.Intent
+import android.graphics.Path
+import android.os.Build
+import android.provider.Settings
+import android.util.Log
+import android.view.accessibility.AccessibilityEvent
+
+class AriaAccessibilityGestureService : AccessibilityService() {
+
+    companion object {
+        private const val TAG = "AriaAccessibility"
+        private var instance: AriaAccessibilityGestureService? = null
+
+        fun isRunning(): Boolean = instance != null
+
+        fun openAccessibilitySettings(context: Context) {
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }
+
+        fun scrollNextVideo(callback: ((Boolean) -> Unit)? = null) {
+            instance?.performSwipeUp(callback) ?: callback?.invoke(false)
+        }
+
+        fun togglePlayPause(callback: ((Boolean) -> Unit)? = null) {
+            instance?.performCenterTap(callback) ?: callback?.invoke(false)
+        }
+    }
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        instance = this
+        Log.d(TAG, "ARIA Accessibility Gesture Service Connected!")
+    }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onInterrupt() {}
+
+    override fun onDestroy() {
+        super.onDestroy()
+        instance = null
+    }
+
+    // 📱 Simulate Upward Swipe (Scroll Next Short/Reel)
+    private fun performSwipeUp(callback: ((Boolean) -> Unit)?) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+
+        val metrics = resources.displayMetrics
+        val startX = metrics.widthPixels * 0.5f
+        val startY = metrics.heightPixels * 0.78f // Near bottom
+        val endX = metrics.widthPixels * 0.5f
+        val endY = metrics.heightPixels * 0.22f   // Near top
+
+        val swipePath = Path().apply {
+            moveTo(startX, startY)
+            lineTo(endX, endY)
+        }
+
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(swipePath, 0, 260)) // 260ms duration
+            .build()
+
+        dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                callback?.invoke(true)
+            }
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                callback?.invoke(false)
+            }
+        }, null)
+    }
+
+    // ⏯️ Simulate Center Tap (Toggle Play/Pause on Video Players)
+    private fun performCenterTap(callback: ((Boolean) -> Unit)?) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+
+        val metrics = resources.displayMetrics
+        val centerX = metrics.widthPixels * 0.5f
+        val centerY = metrics.heightPixels * 0.5f
+
+        val tapPath = Path().apply {
+            moveTo(centerX, centerY)
+        }
+
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(tapPath, 0, 50)) // 50ms tap
+            .build()
+
+        dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                callback?.invoke(true)
+            }
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                callback?.invoke(false)
+            }
+        }, null)
+    }
+}
+""".trimIndent()
+
+    val flutterBridgeCode = """
+// =============================================================================
+// 🌉 lib/services/aria_accessibility_service.dart
+// Flutter Platform Channel Bridge & Natural Language Voice Command Trigger
+// =============================================================================
+import 'package:flutter/services.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+
+class AriaAccessibilityService {
+  static const MethodChannel _channel =
+      MethodChannel('com.example.aria/accessibility');
+  static final FlutterTts _tts = FlutterTts();
+
+  /// Check if the user enabled ARIA in Android Accessibility Settings
+  static Future<bool> isAccessibilityEnabled() async {
+    try {
+      final bool enabled = await _channel.invokeMethod('isAccessibilityEnabled');
+      return enabled;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Open Android System Settings -> Accessibility Screen
+  static Future<void> openAccessibilitySettings() async {
+    try {
+      await _channel.invokeMethod('openAccessibilitySettings');
+    } catch (e) {
+      print('Failed to open settings: ${'$'}e');
+    }
+  }
+
+  /// Process Voice Commands like "scroll this reel", "pause video", "next short"
+  static Future<String?> processVoiceGestureCommand(String query) async {
+    final q = query.toLowerCase().trim();
+
+    // 1. Check for Scroll Command
+    if (q.contains('scroll') || q.contains('next reel') || q.contains('next short') ||
+        q.contains('next video') || q.contains('agla video') || q.contains('reel badlo')) {
+      final bool isRunning = await isAccessibilityEnabled();
+      if (!isRunning) {
+        const msg = "Boss, automated scroll ke liye Accessibility permission enable karni hogi.";
+        await _tts.speak(msg);
+        return msg;
+      }
+
+      await _channel.invokeMethod('scrollNextVideo');
+      const msg = "Video scroll kar diya hai! 📱✨";
+      await _tts.speak(msg);
+      return msg;
+    }
+
+    // 2. Check for Pause / Play Command
+    if (q.contains('pause') || q.contains('play') || q.contains('resume') ||
+        q.contains('video roko') || q.contains('video chalao') || q.contains('pause this')) {
+      final bool isRunning = await isAccessibilityEnabled();
+      if (!isRunning) {
+        const msg = "Boss, video control ke liye Accessibility permission chahiye.";
+        await _tts.speak(msg);
+        return msg;
+      }
+
+      await _channel.invokeMethod('togglePlayPause');
+      const msg = "Video play/pause toggle kar diya hai! ⏯️";
+      await _tts.speak(msg);
+      return msg;
+    }
+
+    return null; // Not a gesture command
+  }
+}
+""".trimIndent()
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "🖐️ Android Accessibility Service & Voice Gestures",
+                        color = CyberCyan,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "1. dispatchGesture() API: Android AccessibilityService can simulate touch gestures across any third-party app (YouTube, Instagram, TikTok) when triggered by voice.\n" +
+                                "2. Voice Commands:\n" +
+                                "   • 'scroll this reel/shorts' -> Dispatches a bottom-to-top swipe path (260ms).\n" +
+                                "   • 'pause this video/reel' -> Dispatches a single tap at the center coordinate.\n" +
+                                "3. Background Wake Word Integration: User can be watching YouTube and say 'Hey ARIA, scroll this' hands-free!\n\n" +
+                                "⚠️ CRITICAL PLATFORM NOTE (Android vs iOS):\n" +
+                                "• ANDROID: Fully supports system-wide gesture automation via AccessibilityService.\n" +
+                                "• iOS (Apple): Strictly blocks third-party apps from simulating gestures or reading external app screens due to iOS sandbox security policy.\n\n" +
+                                "🔒 PRIVACY NOTE:\n" +
+                                "ARIA only dispatches touch events upon explicit voice command. No personal user chats, passwords, or keystrokes are inspected or stored.",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = "1. res/xml/aria_accessibility_service_config.xml",
+                color = CyberCyan,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = configXmlCode)
+        }
+
+        item {
+            Text(
+                text = "2. AndroidManifest.xml (Service Registration)",
+                color = ElectricEmerald,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = manifestXmlCode)
+        }
+
+        item {
+            Text(
+                text = "3. AriaAccessibilityGestureService.kt (Native Gesture Dispatcher)",
+                color = WarningAmber,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = nativeKotlinCode)
+        }
+
+        item {
+            Text(
+                text = "4. lib/services/aria_accessibility_service.dart (Flutter Platform Channel)",
+                color = CyberCyan,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            CodeSnippetBox(code = flutterBridgeCode)
+        }
+    }
+}
+
+@Composable
 fun CodeSnippetBox(code: String) {
     Box(
         modifier = Modifier
@@ -2267,3 +3345,4 @@ fun CodeSnippetBox(code: String) {
         )
     }
 }
+
