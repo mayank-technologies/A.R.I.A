@@ -85,20 +85,30 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.assistant.battery.AriaBatterySaverManager
 import com.example.ui.ActivityLogItem
 import com.example.ui.AriaViewModel
 import com.example.ui.AssistantStatus
 import com.example.ui.MemoryFactItem
 import com.example.ui.components.ArcReactorVisualizer
 import com.example.ui.components.ListeningPulseIndicator
+import com.example.ui.theme.CarbonBlack
+import com.example.ui.theme.ReactorGold
+import com.example.ui.theme.CobaltTech
 import com.example.ui.theme.CyberCyan
+import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.DeepSpace
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricEmerald
 import com.example.ui.theme.GlassBackground
 import com.example.ui.theme.GlassBorderCyan
-import com.example.ui.theme.GlassBorderPurple
-import com.example.ui.theme.NeonPurple
+import com.example.ui.theme.GlassBorderBlue
+import com.example.ui.theme.GlassBorderCyan
+import com.example.ui.theme.LuminousIris
+import com.example.ui.theme.HologramBlue
+import com.example.ui.theme.ElectricCyan
+import com.example.ui.theme.SoftPink
+import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.WarningAmber
@@ -216,14 +226,20 @@ fun VoiceHudScreen(
     var selectedTab by remember { mutableStateOf(HudTab.ALL) }
 
     var showAddMemoryDialog by remember { mutableStateOf(false) }
+    var showBatterySaverDialog by remember { mutableStateOf(false) }
     var newMemoryKey by remember { mutableStateOf("") }
     var newMemoryVal by remember { mutableStateOf("") }
 
-    // Glassmorphism Card Brush & Border Stroke
+    val isBatterySaverActive by AriaBatterySaverManager.isBatterySaverActive.collectAsState()
+    val batteryLevel by AriaBatterySaverManager.batteryLevel.collectAsState()
+    val isCharging by AriaBatterySaverManager.isCharging.collectAsState()
+    val manualBatteryOverride by AriaBatterySaverManager.manualOverride.collectAsState()
+
+    // Glassmorphism Card Brush & Border Stroke (Charcoal Titanium & Electric Cyan HUD Palette)
     val glassCardBrush = Brush.linearGradient(
         colors = listOf(
-            Color(0x330F172A),
-            Color(0x1F1E293B)
+            SurfaceDark,
+            Color(0xEB0D1527)
         )
     )
     val glassBorderStroke = BorderStroke(
@@ -231,7 +247,7 @@ fun VoiceHudScreen(
         brush = Brush.horizontalGradient(
             colors = listOf(
                 GlassBorderCyan,
-                GlassBorderPurple
+                GlassBorderBlue.copy(alpha = 0.4f)
             )
         )
     )
@@ -243,12 +259,12 @@ fun VoiceHudScreen(
                 Brush.verticalGradient(
                     colors = listOf(
                         DeepSpace,
-                        Color(0xFF070E1B),
+                        CarbonBlack,
                         DeepSpace
                     )
                 )
             )
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         // -------------------------------------------------------------
         // 1. TOP STATUS BAR (Centered Title, Live Status & Power Gauge)
@@ -256,7 +272,7 @@ fun VoiceHudScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 4.dp)
+                .padding(vertical = 2.dp)
         ) {
             // Left: Status Indicator & Live Time
             Row(
@@ -272,7 +288,7 @@ fun VoiceHudScreen(
                 Spacer(modifier = Modifier.width(5.dp))
                 Text(
                     text = if (assistantStatus == AssistantStatus.SLEEP) "STANDBY" else "ONLINE",
-                    fontSize = 10.sp,
+                    fontSize = 9.5.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     color = if (assistantStatus == AssistantStatus.SLEEP) WarningAmber else ElectricEmerald,
@@ -281,20 +297,20 @@ fun VoiceHudScreen(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "| $liveTime",
-                    fontSize = 10.sp,
+                    fontSize = 9.5.sp,
                     fontFamily = FontFamily.Monospace,
                     color = TextSecondary
                 )
             }
 
-            // Center: Bold Centered A.R.I.A. Title
+            // Center: Prominent Modern A.R.I.A. Title
             Text(
                 text = "A.R.I.A.",
-                fontSize = 15.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.ExtraBold,
                 fontFamily = FontFamily.Monospace,
-                color = CyberCyan,
-                letterSpacing = 2.sp,
+                color = ElectricCyan,
+                letterSpacing = 2.5.sp,
                 modifier = Modifier.align(Alignment.Center)
             )
 
@@ -304,38 +320,65 @@ fun VoiceHudScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Battery Saver Pill Tag (if active)
+                if (isBatterySaverActive) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(WarningAmber.copy(alpha = 0.2f))
+                            .border(1.dp, WarningAmber.copy(alpha = 0.8f), RoundedCornerShape(12.dp))
+                            .clickable { showBatterySaverDialog = true }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "ECO",
+                            color = WarningAmber,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+
                 // Battery Core Power Gauge
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(16.dp))
                         .background(
-                            if (batteryInfo.isCharging) ElectricEmerald.copy(alpha = 0.15f)
-                            else if (batteryInfo.percentage <= 20) WarningAmber.copy(alpha = 0.15f)
+                            if (isCharging) ElectricEmerald.copy(alpha = 0.15f)
+                            else if (batteryLevel <= 20) WarningAmber.copy(alpha = 0.15f)
                             else GlassBackground
                         )
                         .border(
                             1.dp,
-                            if (batteryInfo.isCharging) ElectricEmerald.copy(alpha = 0.5f) else GlassBorderCyan,
+                            if (isCharging) ElectricEmerald.copy(alpha = 0.5f)
+                            else if (isBatterySaverActive) WarningAmber.copy(alpha = 0.7f)
+                            else GlassBorderCyan,
                             RoundedCornerShape(16.dp)
                         )
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .clickable { showBatterySaverDialog = true }
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                        .testTag("battery_gauge_button")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
-                            imageVector = if (batteryInfo.isCharging) Icons.Default.BatteryChargingFull
-                            else if (batteryInfo.percentage <= 20) Icons.Default.BatteryAlert
+                            imageVector = if (isCharging) Icons.Default.BatteryChargingFull
+                            else if (batteryLevel <= 20) Icons.Default.BatteryAlert
                             else Icons.Default.BatteryFull,
                             contentDescription = "Battery Level",
-                            tint = if (batteryInfo.isCharging) ElectricEmerald else CyberCyan,
-                            modifier = Modifier.size(13.dp)
+                            tint = if (isCharging) ElectricEmerald
+                            else if (batteryLevel <= 20) WarningAmber
+                            else ElectricCyan,
+                            modifier = Modifier.size(12.dp)
                         )
                         Text(
-                            text = "${batteryInfo.percentage}%",
-                            color = TextPrimary,
-                            fontSize = 10.sp,
+                            text = "$batteryLevel%",
+                            color = if (batteryLevel <= 20 && !isCharging) WarningAmber else TextPrimary,
+                            fontSize = 9.5.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
@@ -346,26 +389,26 @@ fun VoiceHudScreen(
                 IconButton(
                     onClick = { viewModel.toggleSleepMode() },
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
-                        .background(if (assistantStatus == AssistantStatus.SLEEP) Color(0xFF1E293B) else GlassBackground)
+                        .background(if (assistantStatus == AssistantStatus.SLEEP) Color(0xFF0F172A) else GlassBackground)
                         .border(1.dp, GlassBorderCyan, CircleShape)
                         .testTag("standby_toggle_button")
                 ) {
                     Icon(
                         imageVector = if (assistantStatus == AssistantStatus.SLEEP) Icons.Default.PowerSettingsNew else Icons.Default.NightsStay,
                         contentDescription = "Toggle Standby Mode",
-                        tint = if (assistantStatus == AssistantStatus.SLEEP) CyberCyan else TextSecondary,
-                        modifier = Modifier.size(16.dp)
+                        tint = if (assistantStatus == AssistantStatus.SLEEP) ElectricCyan else TextSecondary,
+                        modifier = Modifier.size(15.dp)
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // -------------------------------------------------------------
-        // 2. CENTRAL ORB / ARC REACTOR + "ACTIVATE ARIA" CALL TO ACTION
+        // 2. CENTRAL ORB / ARC REACTOR (Decluttered & Compact Size: 120dp)
         // -------------------------------------------------------------
         Box(
             modifier = Modifier
@@ -376,10 +419,10 @@ fun VoiceHudScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Interactive Central Orb Container (Compact size 145dp for generous vertical room)
+                // Interactive Central Orb Container (Compact size 120dp for minimal vertical footprint)
                 Box(
                     modifier = Modifier
-                        .size(145.dp)
+                        .size(120.dp)
                         .clickable {
                             if (assistantStatus == AssistantStatus.SLEEP) {
                                 viewModel.wakeUp()
@@ -392,26 +435,30 @@ fun VoiceHudScreen(
                         .testTag("central_activate_aria_orb"),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Animated Arc Reactor HUD Canvas
-                    ArcReactorVisualizer(status = assistantStatus)
+                    // Animated Arc Reactor HUD Canvas (compact & optimized)
+                    ArcReactorVisualizer(
+                        status = assistantStatus,
+                        disableAnimations = isBatterySaverActive,
+                        modifier = Modifier.size(120.dp)
+                    )
 
                     // Overlay "ACTIVATE ARIA" CTA inside the central core when IDLE or SLEEP
                     if (assistantStatus == AssistantStatus.IDLE || assistantStatus == AssistantStatus.SLEEP) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(GlassBackground)
-                                .border(1.dp, CyberCyan, RoundedCornerShape(24.dp))
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(DeepSpace.copy(alpha = 0.85f))
+                                .border(1.dp, ElectricCyan, RoundedCornerShape(20.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "ACTIVATE ARIA",
-                                color = CyberCyan,
-                                fontSize = 10.sp,
+                                color = ElectricCyan,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
-                                letterSpacing = 1.5.sp
+                                letterSpacing = 1.2.sp
                             )
                         }
                     } else {
@@ -424,67 +471,67 @@ fun VoiceHudScreen(
                         }
                         val statusTint = when (assistantStatus) {
                             AssistantStatus.LISTENING -> WarningAmber
-                            AssistantStatus.PROCESSING -> NeonPurple
+                            AssistantStatus.PROCESSING -> HologramBlue
                             AssistantStatus.SPEAKING -> ElectricEmerald
-                            else -> CyberCyan
+                            else -> ElectricCyan
                         }
 
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(24.dp))
+                                .clip(RoundedCornerShape(20.dp))
                                 .background(statusTint.copy(alpha = 0.2f))
-                                .border(1.dp, statusTint, RoundedCornerShape(24.dp))
-                                .padding(horizontal = 12.dp, vertical = 5.dp),
+                                .border(1.dp, statusTint, RoundedCornerShape(20.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = statusLabel,
                                 color = statusTint,
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
-                                letterSpacing = 1.2.sp
+                                letterSpacing = 1.sp
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                // Hands-Free Wake-Word Toggle Badge
+                // Hands-Free Wake-Word Toggle Badge (Compact pill)
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(18.dp))
                         .background(
                             if (isWakeWordModeEnabled) ElectricEmerald.copy(alpha = 0.15f)
-                            else Color(0xFF1E293B).copy(alpha = 0.7f)
+                            else Color(0xFF0F172A).copy(alpha = 0.7f)
                         )
                         .border(
                             1.dp,
-                            if (isWakeWordModeEnabled) ElectricEmerald.copy(alpha = 0.7f) else GlassBorderCyan,
-                            RoundedCornerShape(20.dp)
+                            if (isWakeWordModeEnabled) ElectricEmerald.copy(alpha = 0.6f) else GlassBorderCyan,
+                            RoundedCornerShape(18.dp)
                         )
                         .clickable { viewModel.toggleWakeWordMode() }
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .padding(horizontal = 10.dp, vertical = 3.dp)
                         .testTag("wake_word_toggle_badge")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.RecordVoiceOver,
                             contentDescription = "Wake Word Status",
                             tint = if (isWakeWordModeEnabled) ElectricEmerald else TextSecondary,
-                            modifier = Modifier.size(12.dp)
+                            modifier = Modifier.size(11.dp)
                         )
                         Text(
-                            text = if (isWakeWordModeEnabled) "WAKE-WORD ACTIVE: 'HEY ARIA' 🎙️" else "WAKE-WORD: 'HEY ARIA' (TAP TO ENABLE)",
+                            text = if (isWakeWordModeEnabled) "WAKE-WORD: 'HEY ARIA' 🎙️" else "WAKE-WORD: 'HEY ARIA' (TAP TO ENABLE)",
                             color = if (isWakeWordModeEnabled) ElectricEmerald else TextSecondary,
-                            fontSize = 9.5.sp,
+                            fontSize = 8.5.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            letterSpacing = 0.8.sp
+                            letterSpacing = 0.6.sp
                         )
                     }
                 }
@@ -492,23 +539,24 @@ fun VoiceHudScreen(
                 // Active Listening Audio Wave Ripple Indicator
                 ListeningPulseIndicator(
                     isListening = assistantStatus == AssistantStatus.LISTENING,
-                    modifier = Modifier.padding(top = 2.dp)
+                    disableAnimations = isBatterySaverActive,
+                    modifier = Modifier.padding(top = 1.dp)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // -------------------------------------------------------------
-        // 3. CLEAN SEGMENTED CONTROL BAR (Unified Rounded Glass Container)
+        // 3. SEGMENTED CONTROL BAR (Unified Rounded Carbon Container)
         // -------------------------------------------------------------
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF0F172A).copy(alpha = 0.85f))
-                .border(1.dp, GlassBorderCyan, RoundedCornerShape(24.dp))
-                .padding(4.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(Color(0xFF0A101F).copy(alpha = 0.85f))
+                .border(1.dp, GlassBorderCyan, RoundedCornerShape(22.dp))
+                .padding(3.dp)
         ) {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -518,18 +566,18 @@ fun VoiceHudScreen(
                     val isSelected = selectedTab == tab
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(18.dp))
                             .background(
-                                if (isSelected) CyberCyan.copy(alpha = 0.25f)
+                                if (isSelected) ElectricCyan.copy(alpha = 0.2f)
                                 else Color.Transparent
                             )
                             .border(
                                 width = 1.dp,
-                                color = if (isSelected) CyberCyan else Color.Transparent,
-                                shape = RoundedCornerShape(20.dp)
+                                color = if (isSelected) ElectricCyan else Color.Transparent,
+                                shape = RoundedCornerShape(18.dp)
                             )
                             .clickable { selectedTab = tab }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .padding(horizontal = 11.dp, vertical = 5.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -537,12 +585,12 @@ fun VoiceHudScreen(
                         ) {
                             Text(
                                 text = tab.icon,
-                                fontSize = 11.sp
+                                fontSize = 10.5.sp
                             )
                             Text(
                                 text = tab.label,
-                                color = if (isSelected) CyberCyan else TextSecondary,
-                                fontSize = 10.sp,
+                                color = if (isSelected) ElectricCyan else TextSecondary,
+                                fontSize = 9.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 fontFamily = FontFamily.Monospace,
                                 letterSpacing = 0.5.sp
@@ -553,7 +601,8 @@ fun VoiceHudScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        // Distinct Visual Separation between Tabs and Voice Terminal Section (18dp)
+        Spacer(modifier = Modifier.height(18.dp))
 
         // -------------------------------------------------------------
         // 4. MAIN SCROLLABLE HUD CONTENT PANELS
@@ -562,8 +611,8 @@ fun VoiceHudScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(bottom = 8.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(bottom = 6.dp)
         ) {
             // =========================================================
             // MERGED PANEL: CONVERSATION TRANSCRIPT & LIVE VOICE TERMINAL
@@ -573,16 +622,16 @@ fun VoiceHudScreen(
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(18.dp),
                         border = glassBorderStroke
                     ) {
                         Box(
                             modifier = Modifier
                                 .background(glassCardBrush)
-                                .padding(16.dp)
+                                .padding(14.dp)
                         ) {
                             Column {
-                                // Panel Header
+                                // Panel Header with Muted Monospace Hierarchy
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -592,16 +641,16 @@ fun VoiceHudScreen(
                                         Icon(
                                             imageVector = Icons.Default.ChatBubbleOutline,
                                             contentDescription = "Transcript",
-                                            tint = CyberCyan,
-                                            modifier = Modifier.size(16.dp)
+                                            tint = ElectricCyan,
+                                            modifier = Modifier.size(15.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = "VOICE TERMINAL & TRANSCRIPT",
-                                            fontSize = 11.sp,
+                                            fontSize = 10.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace,
-                                            color = CyberCyan,
+                                            color = ElectricCyan,
                                             letterSpacing = 1.sp
                                         )
                                     }
@@ -609,31 +658,31 @@ fun VoiceHudScreen(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         IconButton(
                                             onClick = { viewModel.toggleTtsMute() },
-                                            modifier = Modifier.size(26.dp)
+                                            modifier = Modifier.size(24.dp)
                                         ) {
                                             Icon(
                                                 imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
                                                 contentDescription = "Mute",
                                                 tint = if (isMuted) WarningAmber else ElectricEmerald,
-                                                modifier = Modifier.size(15.dp)
+                                                modifier = Modifier.size(14.dp)
                                             )
                                         }
                                         IconButton(
                                             onClick = { viewModel.replaySpeech() },
-                                            modifier = Modifier.size(26.dp)
+                                            modifier = Modifier.size(24.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Replay,
                                                 contentDescription = "Replay",
-                                                tint = CyberCyan,
-                                                modifier = Modifier.size(15.dp)
+                                                tint = ElectricCyan,
+                                                modifier = Modifier.size(14.dp)
                                             )
                                         }
                                         if (voiceHistory.isNotEmpty()) {
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
                                                 text = "Clear",
-                                                fontSize = 10.sp,
+                                                fontSize = 9.5.sp,
                                                 color = WarningAmber,
                                                 fontFamily = FontFamily.Monospace,
                                                 fontWeight = FontWeight.Bold,
@@ -643,43 +692,43 @@ fun VoiceHudScreen(
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
                                 // Active Live Voice Response Block
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(Color(0xFF0F172A).copy(alpha = 0.6f))
-                                        .border(1.dp, GlassBorderCyan, RoundedCornerShape(14.dp))
-                                        .padding(12.dp)
-                                ) {
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF070E1B).copy(alpha = 0.8f))
+                                        .border(1.dp, GlassBorderCyan, RoundedCornerShape(12.dp))
+                                        .padding(11.dp)
+                                 ) {
                                     Column {
                                         if (lastQuery.isNotBlank()) {
                                             Text(
                                                 text = "USER: $lastQuery",
                                                 color = TextSecondary,
-                                                fontSize = 11.sp,
+                                                fontSize = 10.5.sp,
                                                 fontFamily = FontFamily.Monospace,
                                                 fontWeight = FontWeight.Medium
                                             )
-                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Spacer(modifier = Modifier.height(3.dp))
                                         }
 
                                         Row(verticalAlignment = Alignment.Top) {
                                             Icon(
                                                 imageVector = Icons.Default.RecordVoiceOver,
                                                 contentDescription = "ARIA",
-                                                tint = if (isSpeaking) ElectricEmerald else CyberCyan,
+                                                tint = if (isSpeaking) ElectricEmerald else ElectricCyan,
                                                 modifier = Modifier
-                                                    .size(16.dp)
+                                                    .size(15.dp)
                                                     .padding(top = 2.dp)
                                             )
-                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Spacer(modifier = Modifier.width(7.dp))
                                             Text(
                                                 text = latestResponse,
                                                 color = TextPrimary,
-                                                fontSize = 12.5.sp,
+                                                fontSize = 12.sp,
                                                 lineHeight = 17.sp,
                                                 fontWeight = FontWeight.Normal,
                                                 modifier = Modifier.weight(1f)
@@ -697,68 +746,59 @@ fun VoiceHudScreen(
                                                         val url = pendingWebUrl
                                                         if (url != null) viewModel.openWebUrlInApp(url)
                                                     },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan),
                                                     shape = RoundedCornerShape(10.dp),
-                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp)
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.OpenInNew,
                                                         contentDescription = "Open In-App",
-                                                        modifier = Modifier.size(13.dp)
+                                                        tint = DeepSpace,
+                                                        modifier = Modifier.size(12.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(4.dp))
-                                                    Text(text = "Open In-App", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                                    Text(text = "Open In-App", color = DeepSpace, fontSize = 9.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                                                 }
                                                 Button(
                                                     onClick = { viewModel.closeWebBrowser() },
                                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
                                                     shape = RoundedCornerShape(10.dp),
-                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp)
                                                 ) {
-                                                    Text(text = "Close", fontSize = 10.sp, color = Color.White, fontFamily = FontFamily.Monospace)
+                                                    Text(text = "Close", fontSize = 9.5.sp, color = Color.White, fontFamily = FontFamily.Monospace)
                                                 }
                                             }
                                         }
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(12.dp))
+                                // CONDITIONAL TRANSCRIPT HISTORY: Hidden completely if empty so no wasted space
+                                if (voiceHistory.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(10.dp))
 
-                                // Subtle Glass Divider
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(1.dp)
-                                        .background(GlassBorderCyan.copy(alpha = 0.5f))
-                                )
-
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                // Past Chat History Bubbles
-                                Text(
-                                    text = "TRANSCRIPT HISTORY",
-                                    fontSize = 9.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = TextSecondary,
-                                    letterSpacing = 1.sp
-                                )
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                if (voiceHistory.isEmpty()) {
-                                    Text(
-                                        text = "No past transcripts recorded yet.",
-                                        color = TextSecondary,
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        textAlign = TextAlign.Center,
+                                    // Subtle Glass Divider
+                                    Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(vertical = 8.dp)
+                                            .height(1.dp)
+                                            .background(GlassBorderCyan.copy(alpha = 0.3f))
                                     )
-                                } else {
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    // Past Chat History Bubbles
+                                    Text(
+                                        text = "TRANSCRIPT HISTORY",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = TextSecondary,
+                                        letterSpacing = 1.sp
+                                    )
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                         voiceHistory.take(6).forEach { item ->
                                             // User Query Bubble (Right-aligned)
                                             Box(
@@ -768,23 +808,23 @@ fun VoiceHudScreen(
                                                 Box(
                                                     modifier = Modifier
                                                         .fillMaxWidth(0.85f)
-                                                        .clip(RoundedCornerShape(14.dp, 14.dp, 2.dp, 14.dp))
-                                                        .background(CyberCyan.copy(alpha = 0.12f))
-                                                        .border(1.dp, CyberCyan.copy(alpha = 0.35f), RoundedCornerShape(14.dp, 14.dp, 2.dp, 14.dp))
-                                                        .padding(8.dp)
+                                                        .clip(RoundedCornerShape(12.dp, 12.dp, 2.dp, 12.dp))
+                                                        .background(ElectricCyan.copy(alpha = 0.12f))
+                                                        .border(1.dp, ElectricCyan.copy(alpha = 0.35f), RoundedCornerShape(12.dp, 12.dp, 2.dp, 12.dp))
+                                                        .padding(7.dp)
                                                 ) {
                                                     Column {
                                                         Text(
                                                             text = "USER",
-                                                            fontSize = 8.5.sp,
+                                                            fontSize = 8.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             fontFamily = FontFamily.Monospace,
-                                                            color = CyberCyan
+                                                            color = ElectricCyan
                                                         )
                                                         Text(
                                                             text = item.query,
                                                             color = TextPrimary,
-                                                            fontSize = 11.5.sp
+                                                            fontSize = 11.sp
                                                         )
                                                     }
                                                 }
@@ -798,38 +838,38 @@ fun VoiceHudScreen(
                                                 Box(
                                                     modifier = Modifier
                                                         .fillMaxWidth(0.88f)
-                                                        .clip(RoundedCornerShape(14.dp, 14.dp, 14.dp, 2.dp))
-                                                        .background(NeonPurple.copy(alpha = 0.12f))
-                                                        .border(1.dp, GlassBorderPurple, RoundedCornerShape(14.dp, 14.dp, 14.dp, 2.dp))
-                                                        .padding(8.dp)
+                                                        .clip(RoundedCornerShape(12.dp, 12.dp, 12.dp, 2.dp))
+                                                        .background(HologramBlue.copy(alpha = 0.10f))
+                                                        .border(1.dp, GlassBorderBlue, RoundedCornerShape(12.dp, 12.dp, 12.dp, 2.dp))
+                                                        .padding(7.dp)
                                                 ) {
                                                     Column {
                                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                                            Icon(
-                                                                imageVector = Icons.Default.RecordVoiceOver,
-                                                                contentDescription = "ARIA",
-                                                                tint = NeonPurple,
-                                                                modifier = Modifier.size(11.dp)
-                                                            )
-                                                            Spacer(modifier = Modifier.width(4.dp))
-                                                            Text(
-                                                                text = "ARIA",
-                                                                fontSize = 8.5.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                fontFamily = FontFamily.Monospace,
-                                                                color = NeonPurple
-                                                            )
-                                                        }
-                                                        Spacer(modifier = Modifier.height(2.dp))
-                                                        Text(
-                                                            text = item.response,
-                                                            color = TextPrimary,
-                                                            fontSize = 11.5.sp,
-                                                            lineHeight = 15.sp
-                                                        )
-                                                    }
-                                                }
-                                            }
+                                                             Icon(
+                                                                 imageVector = Icons.Default.RecordVoiceOver,
+                                                                 contentDescription = "ARIA",
+                                                                 tint = HologramBlue,
+                                                                 modifier = Modifier.size(10.dp)
+                                                             )
+                                                             Spacer(modifier = Modifier.width(4.dp))
+                                                             Text(
+                                                                 text = "ARIA",
+                                                                 fontSize = 8.sp,
+                                                                 fontWeight = FontWeight.Bold,
+                                                                 fontFamily = FontFamily.Monospace,
+                                                                 color = HologramBlue
+                                                             )
+                                                         }
+                                                         Spacer(modifier = Modifier.height(2.dp))
+                                                         Text(
+                                                             text = item.response,
+                                                             color = TextPrimary,
+                                                             fontSize = 11.sp,
+                                                             lineHeight = 15.sp
+                                                         )
+                                                     }
+                                                 }
+                                             }
                                         }
                                     }
                                 }
@@ -847,13 +887,13 @@ fun VoiceHudScreen(
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(18.dp),
                         border = glassBorderStroke
                     ) {
                         Box(
                             modifier = Modifier
                                 .background(glassCardBrush)
-                                .padding(16.dp)
+                                .padding(14.dp)
                         ) {
                             Column {
                                 Row(
@@ -866,12 +906,12 @@ fun VoiceHudScreen(
                                             imageVector = Icons.Default.FlashOn,
                                             contentDescription = "System Activity",
                                             tint = ElectricEmerald,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(15.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = "SYSTEM ACTIVITY LOG",
-                                            fontSize = 11.sp,
+                                            fontSize = 10.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace,
                                             color = ElectricEmerald,
@@ -880,22 +920,22 @@ fun VoiceHudScreen(
                                     }
                                     Text(
                                         text = "${activityLogs.size} Events",
-                                        fontSize = 10.sp,
+                                        fontSize = 9.5.sp,
                                         color = TextSecondary,
                                         fontFamily = FontFamily.Monospace
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     activityLogs.take(6).forEach { log ->
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(10.dp))
-                                                .background(Color(0xFF0F172A).copy(alpha = 0.5f))
-                                                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(10.dp))
+                                                .background(Color(0xFF070E1B).copy(alpha = 0.6f))
+                                                .border(1.dp, GlassBorderCyan, RoundedCornerShape(10.dp))
                                                 .padding(horizontal = 10.dp, vertical = 6.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.SpaceBetween
@@ -917,7 +957,7 @@ fun VoiceHudScreen(
                                                     if (log.detail.isNotBlank()) {
                                                         Text(
                                                             text = log.detail,
-                                                            fontSize = 10.sp,
+                                                            fontSize = 9.5.sp,
                                                             color = TextSecondary,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
@@ -927,7 +967,7 @@ fun VoiceHudScreen(
                                             }
                                             Text(
                                                 text = log.timeAgo,
-                                                fontSize = 9.sp,
+                                                fontSize = 8.5.sp,
                                                 color = TextSecondary,
                                                 fontFamily = FontFamily.Monospace
                                             )
@@ -948,13 +988,13 @@ fun VoiceHudScreen(
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(18.dp),
                         border = glassBorderStroke
                     ) {
                         Box(
                             modifier = Modifier
                                 .background(glassCardBrush)
-                                .padding(16.dp)
+                                .padding(14.dp)
                         ) {
                             Column {
                                 Row(
@@ -966,16 +1006,16 @@ fun VoiceHudScreen(
                                         Icon(
                                             imageVector = Icons.Default.Psychology,
                                             contentDescription = "Memory",
-                                            tint = NeonPurple,
-                                            modifier = Modifier.size(18.dp)
+                                            tint = HologramBlue,
+                                            modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = "A.R.I.A. MEMORY & FACTS",
-                                            fontSize = 11.sp,
+                                            fontSize = 10.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace,
-                                            color = NeonPurple,
+                                            color = HologramBlue,
                                             letterSpacing = 1.sp
                                         )
                                     }
@@ -987,46 +1027,46 @@ fun VoiceHudScreen(
                                         Icon(
                                             imageVector = Icons.Default.Add,
                                             contentDescription = "Add Memory",
-                                            tint = CyberCyan,
-                                            modifier = Modifier.size(14.dp)
+                                            tint = ElectricCyan,
+                                            modifier = Modifier.size(13.dp)
                                         )
                                         Spacer(modifier = Modifier.width(2.dp))
                                         Text(
                                             text = "Add Fact",
-                                            fontSize = 10.sp,
-                                            color = CyberCyan,
+                                            fontSize = 9.5.sp,
+                                            color = ElectricCyan,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace
                                         )
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     memoryFacts.forEach { fact ->
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(12.dp))
-                                                .background(NeonPurple.copy(alpha = 0.1f))
-                                                .border(1.dp, GlassBorderPurple, RoundedCornerShape(12.dp))
-                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                .background(HologramBlue.copy(alpha = 0.08f))
+                                                .border(1.dp, GlassBorderBlue, RoundedCornerShape(12.dp))
+                                                .padding(horizontal = 10.dp, vertical = 7.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
                                                     text = fact.key.uppercase(Locale.ROOT),
-                                                    fontSize = 9.sp,
+                                                    fontSize = 8.5.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     fontFamily = FontFamily.Monospace,
-                                                    color = NeonPurple,
+                                                    color = HologramBlue,
                                                     letterSpacing = 1.sp
                                                 )
                                                 Text(
                                                     text = fact.value,
-                                                    fontSize = 12.sp,
+                                                    fontSize = 11.5.sp,
                                                     color = TextPrimary,
                                                     fontWeight = FontWeight.Medium
                                                 )
@@ -1034,13 +1074,13 @@ fun VoiceHudScreen(
 
                                             IconButton(
                                                 onClick = { viewModel.removeMemoryFact(fact.id) },
-                                                modifier = Modifier.size(24.dp)
+                                                modifier = Modifier.size(22.dp)
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.Delete,
                                                     contentDescription = "Delete Memory Fact",
                                                     tint = TextSecondary.copy(alpha = 0.6f),
-                                                    modifier = Modifier.size(14.dp)
+                                                    modifier = Modifier.size(13.dp)
                                                 )
                                             }
                                         }
@@ -1067,24 +1107,24 @@ fun VoiceHudScreen(
                                 .weight(1f)
                                 .clickable { viewModel.submitTextCommand("Weather in Delhi") },
                             colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                            shape = RoundedCornerShape(18.dp),
+                            shape = RoundedCornerShape(16.dp),
                             border = glassBorderStroke
                         ) {
                             Box(
                                 modifier = Modifier
                                     .background(glassCardBrush)
-                                    .padding(12.dp)
+                                    .padding(11.dp)
                             ) {
                                 Column {
                                     Text(
                                         text = "WEATHER HUD",
-                                        fontSize = 9.sp,
+                                        fontSize = 8.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
-                                        color = CyberCyan,
+                                        color = ElectricCyan,
                                         letterSpacing = 1.sp
                                     )
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Spacer(modifier = Modifier.height(3.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1092,18 +1132,18 @@ fun VoiceHudScreen(
                                     ) {
                                         Text(
                                             text = "28°C",
-                                            fontSize = 16.sp,
+                                            fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = TextPrimary
                                         )
                                         Icon(
                                             imageVector = Icons.Default.WbSunny,
                                             contentDescription = "Weather",
-                                            tint = CyberCyan,
-                                            modifier = Modifier.size(18.dp)
+                                            tint = ElectricCyan,
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
-                                    Text(text = "Clear Sky, Delhi", fontSize = 10.sp, color = TextSecondary)
+                                    Text(text = "Clear Sky, Delhi", fontSize = 9.5.sp, color = TextSecondary)
                                 }
                             }
                         }
@@ -1112,24 +1152,24 @@ fun VoiceHudScreen(
                         Card(
                             modifier = Modifier.weight(1f),
                             colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                            shape = RoundedCornerShape(18.dp),
+                            shape = RoundedCornerShape(16.dp),
                             border = glassBorderStroke
                         ) {
                             Box(
                                 modifier = Modifier
                                     .background(glassCardBrush)
-                                    .padding(12.dp)
+                                    .padding(11.dp)
                             ) {
                                 Column {
                                     Text(
                                         text = "TASKS HUD",
-                                        fontSize = 9.sp,
+                                        fontSize = 8.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
-                                        color = NeonPurple,
+                                        color = HologramBlue,
                                         letterSpacing = 1.sp
                                     )
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Spacer(modifier = Modifier.height(3.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1137,21 +1177,21 @@ fun VoiceHudScreen(
                                     ) {
                                         Text(
                                             text = "${reminders.filter { !it.isCompleted }.size} Active",
-                                            fontSize = 15.sp,
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = TextPrimary
                                         )
                                         Icon(
                                             imageVector = Icons.Default.Notifications,
                                             contentDescription = "Reminders",
-                                            tint = NeonPurple,
-                                            modifier = Modifier.size(18.dp)
+                                            tint = HologramBlue,
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
                                     val topReminder = reminders.firstOrNull { !it.isCompleted }?.title ?: "No upcoming tasks"
                                     Text(
                                         text = topReminder,
-                                        fontSize = 10.sp,
+                                        fontSize = 9.5.sp,
                                         color = TextSecondary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -1164,43 +1204,43 @@ fun VoiceHudScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         // -------------------------------------------------------------
-        // 5. COMPACT QUICK VOICE COMMAND SUGGESTION CHIPS
+        // 5. COMPACT QUICK VOICE COMMAND SUGGESTION CHIPS (Tight single row)
         // -------------------------------------------------------------
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             item {
                 SuggestionChip(
                     onClick = { viewModel.submitTextCommand("Hey ARIA") },
-                    label = { Text("🎙️ Hey ARIA", fontSize = 9.5.sp, color = ElectricEmerald, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace) },
+                    label = { Text("🎙️ Hey ARIA", fontSize = 8.5.sp, color = ElectricEmerald, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace) },
                     colors = SuggestionChipDefaults.suggestionChipColors(containerColor = ElectricEmerald.copy(alpha = 0.12f)),
-                    border = BorderStroke(1.dp, ElectricEmerald.copy(alpha = 0.5f))
+                    border = BorderStroke(1.dp, ElectricEmerald.copy(alpha = 0.45f))
                 )
             }
             item {
                 SuggestionChip(
                     onClick = { viewModel.submitTextCommand("WhatsApp message Rahul Hello Boss") },
-                    label = { Text("💬 WhatsApp", fontSize = 9.5.sp, color = NeonPurple, fontWeight = FontWeight.Bold) },
-                    colors = SuggestionChipDefaults.suggestionChipColors(containerColor = NeonPurple.copy(alpha = 0.12f)),
-                    border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.4f))
+                    label = { Text("💬 WhatsApp", fontSize = 8.5.sp, color = HologramBlue, fontWeight = FontWeight.Bold) },
+                    colors = SuggestionChipDefaults.suggestionChipColors(containerColor = HologramBlue.copy(alpha = 0.12f)),
+                    border = BorderStroke(1.dp, HologramBlue.copy(alpha = 0.4f))
                 )
             }
             item {
                 SuggestionChip(
                     onClick = { viewModel.triggerBriefingSummary() },
-                    label = { Text("☀️ Morning Brief", fontSize = 9.5.sp, color = CyberCyan, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace) },
-                    colors = SuggestionChipDefaults.suggestionChipColors(containerColor = GlassBackground),
-                    border = BorderStroke(1.dp, GlassBorderCyan)
+                    label = { Text("☀️ Morning Brief", fontSize = 8.5.sp, color = ReactorGold, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace) },
+                    colors = SuggestionChipDefaults.suggestionChipColors(containerColor = ReactorGold.copy(alpha = 0.12f)),
+                    border = BorderStroke(1.dp, ReactorGold.copy(alpha = 0.4f))
                 )
             }
             item {
                 SuggestionChip(
                     onClick = { viewModel.submitTextCommand("Weather in Delhi") },
-                    label = { Text("🌤️ Weather", fontSize = 9.5.sp, color = TextPrimary) },
+                    label = { Text("🌤️ Weather", fontSize = 8.5.sp, color = ElectricCyan) },
                     colors = SuggestionChipDefaults.suggestionChipColors(containerColor = GlassBackground),
                     border = BorderStroke(1.dp, GlassBorderCyan)
                 )
@@ -1208,7 +1248,7 @@ fun VoiceHudScreen(
             item {
                 SuggestionChip(
                     onClick = { viewModel.submitTextCommand("Open Flipkart") },
-                    label = { Text("🛍️ Flipkart", fontSize = 9.5.sp, color = TextPrimary) },
+                    label = { Text("🛍️ Flipkart", fontSize = 8.5.sp, color = TextPrimary) },
                     colors = SuggestionChipDefaults.suggestionChipColors(containerColor = GlassBackground),
                     border = BorderStroke(1.dp, GlassBorderCyan)
                 )
@@ -1227,7 +1267,7 @@ fun VoiceHudScreen(
             OutlinedTextField(
                 value = inputText,
                 onValueChange = { inputText = it },
-                placeholder = { Text("Type command for ARIA...", color = TextSecondary, fontSize = 11.5.sp, fontFamily = FontFamily.Monospace) },
+                placeholder = { Text("Type command for ARIA...", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace) },
                 modifier = Modifier
                     .weight(1f)
                     .testTag("text_command_input"),
@@ -1235,12 +1275,12 @@ fun VoiceHudScreen(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = GlassBackground,
                     unfocusedContainerColor = GlassBackground,
-                    focusedBorderColor = CyberCyan,
+                    focusedBorderColor = ElectricCyan,
                     unfocusedBorderColor = GlassBorderCyan,
                     focusedTextColor = TextPrimary,
                     unfocusedTextColor = TextPrimary
                 ),
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(22.dp)
             )
 
             Spacer(modifier = Modifier.width(6.dp))
@@ -1255,17 +1295,17 @@ fun VoiceHudScreen(
                     }
                 },
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
-                    .background(if (assistantStatus == AssistantStatus.LISTENING) WarningAmber else Color(0xFF1E293B))
-                    .border(1.dp, GlassBorderCyan, CircleShape)
+                    .background(if (assistantStatus == AssistantStatus.LISTENING) WarningAmber else Color(0xFF0F172A))
+                    .border(1.dp, if (assistantStatus == AssistantStatus.LISTENING) WarningAmber else GlassBorderCyan, CircleShape)
                     .testTag("direct_mic_button")
             ) {
                 Icon(
                     imageVector = if (assistantStatus == AssistantStatus.LISTENING) Icons.Default.MicOff else Icons.Default.Mic,
                     contentDescription = "Voice Mic Input",
-                    tint = if (assistantStatus == AssistantStatus.LISTENING) Color.Black else CyberCyan,
-                    modifier = Modifier.size(18.dp)
+                    tint = if (assistantStatus == AssistantStatus.LISTENING) Color.Black else ElectricCyan,
+                    modifier = Modifier.size(17.dp)
                 )
             }
 
@@ -1280,16 +1320,16 @@ fun VoiceHudScreen(
                     }
                 },
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
-                    .background(CyberCyan)
+                    .background(ElectricCyan)
                     .testTag("send_command_button")
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
                     contentDescription = "Send Command",
                     tint = DeepSpace,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(15.dp)
                 )
             }
         }
@@ -1307,7 +1347,7 @@ fun VoiceHudScreen(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    color = NeonPurple
+                    color = ElectricCyan
                 )
             },
             text = {
@@ -1322,14 +1362,22 @@ fun VoiceHudScreen(
                         onValueChange = { newMemoryKey = it },
                         label = { Text("Memory Key (e.g. Favorite Food)") },
                         singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonPurple)
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = ElectricCyan,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
                     )
                     OutlinedTextField(
                         value = newMemoryVal,
                         onValueChange = { newMemoryVal = it },
                         label = { Text("Value / Preference (e.g. Pizza & Pasta)") },
                         singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonPurple)
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = ElectricCyan,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
                     )
                 }
             },
@@ -1343,14 +1391,209 @@ fun VoiceHudScreen(
                             showAddMemoryDialog = false
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonPurple)
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan)
                 ) {
-                    Text("Save Memory", color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                    Text("Save Memory", color = DeepSpace, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showAddMemoryDialog = false }) {
                     Text("Cancel", color = TextSecondary, fontSize = 12.sp)
+                }
+            },
+            containerColor = Color(0xFF0F172A),
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+
+    // -------------------------------------------------------------
+    // BATTERY SAVER & POWER OPTIMIZATION DIALOG
+    // -------------------------------------------------------------
+    if (showBatterySaverDialog) {
+        val context = LocalContext.current
+        AlertDialog(
+            onDismissRequest = { showBatterySaverDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isCharging) Icons.Default.BatteryChargingFull
+                        else if (batteryLevel <= 20) Icons.Default.BatteryAlert
+                        else Icons.Default.BatteryFull,
+                        contentDescription = "Battery Manager",
+                        tint = if (isCharging) ElectricEmerald
+                        else if (isBatterySaverActive) WarningAmber
+                        else CyberCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "POWER & BATTERY SAVER",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberCyan
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Battery Level & Status Header
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF1E293B).copy(alpha = 0.6f))
+                            .border(1.dp, if (isBatterySaverActive) WarningAmber.copy(alpha = 0.5f) else GlassBorderCyan, RoundedCornerShape(14.dp))
+                            .padding(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Current Level: $batteryLevel%",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = if (isCharging) "Status: Charging ⚡" else "Status: On Battery 🔋",
+                                    color = if (isCharging) ElectricEmerald else TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isBatterySaverActive) WarningAmber.copy(alpha = 0.2f) else ElectricEmerald.copy(alpha = 0.15f))
+                                    .border(1.dp, if (isBatterySaverActive) WarningAmber else ElectricEmerald, RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = if (isBatterySaverActive) "SAVER ACTIVE" else "OPTIMAL",
+                                    color = if (isBatterySaverActive) WarningAmber else ElectricEmerald,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Mode Selection (Auto activates below 20%):",
+                        fontSize = 11.sp,
+                        color = TextSecondary
+                    )
+
+                    // Mode Selection Options
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // AUTO
+                        val isAuto = manualBatteryOverride == null
+                        Button(
+                            onClick = { AriaBatterySaverManager.resetToAutoMode(context) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isAuto) CyberCyan.copy(alpha = 0.3f) else Color(0xFF1E293B)
+                            ),
+                            border = BorderStroke(1.dp, if (isAuto) CyberCyan else Color.Transparent),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                "Auto (<20%)",
+                                fontSize = 10.sp,
+                                color = if (isAuto) CyberCyan else TextSecondary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // FORCE ON
+                        val isForceOn = manualBatteryOverride == true
+                        Button(
+                            onClick = { AriaBatterySaverManager.setManualOverride(true, context) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isForceOn) WarningAmber.copy(alpha = 0.3f) else Color(0xFF1E293B)
+                            ),
+                            border = BorderStroke(1.dp, if (isForceOn) WarningAmber else Color.Transparent),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                "Force ON",
+                                fontSize = 10.sp,
+                                color = if (isForceOn) WarningAmber else TextSecondary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // FORCE OFF
+                        val isForceOff = manualBatteryOverride == false
+                        Button(
+                            onClick = { AriaBatterySaverManager.setManualOverride(false, context) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isForceOff) ElectricEmerald.copy(alpha = 0.3f) else Color(0xFF1E293B)
+                            ),
+                            border = BorderStroke(1.dp, if (isForceOff) ElectricEmerald else Color.Transparent),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                "Off",
+                                fontSize = 10.sp,
+                                color = if (isForceOff) ElectricEmerald else TextSecondary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // Active Power Protections
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF070E1B))
+                            .border(1.dp, GlassBorderCyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "⚡ Battery Saver Power Optimizations:",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CyberCyan
+                        )
+                        Text(
+                            text = "• Background sync & wake-loop frequency throttled (saving CPU wake locks).",
+                            fontSize = 9.5.sp,
+                            color = TextSecondary
+                        )
+                        Text(
+                            text = "• Non-essential GPU/Canvas animations disabled (Arc Reactor & Edge Glow).",
+                            fontSize = 9.5.sp,
+                            color = TextSecondary
+                        )
+                        Text(
+                            text = "• Speech recognition restart duty cycle optimized.",
+                            fontSize = 9.5.sp,
+                            color = TextSecondary
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showBatterySaverDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                ) {
+                    Text("Close", color = DeepSpace, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = Color(0xFF0F172A),

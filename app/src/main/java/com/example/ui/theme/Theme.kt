@@ -6,20 +6,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
-    primary = CyberCyan,
-    onPrimary = Color.Black,
-    primaryContainer = ElectricBlue,
+    primary = ElectricCyan,
+    onPrimary = Color(0xFF040711),
+    primaryContainer = Color(0xFF0284C7),
     onPrimaryContainer = Color.White,
-    secondary = NeonPurple,
-    onSecondary = Color.White,
-    tertiary = ElectricEmerald,
+    secondary = HologramBlue,
+    onSecondary = Color(0xFF040711),
+    secondaryContainer = Color(0x3300E5FF),
+    tertiary = ReactorGold,
     background = DeepSpace,
     onBackground = TextPrimary,
     surface = SurfaceDark,
     onSurface = TextPrimary,
     surfaceVariant = SurfaceVariantDark,
     onSurfaceVariant = TextSecondary,
-    outline = SurfaceVariantDark
+    outline = GlassBorderCyan
 )
 
 @Composable
@@ -32,3 +33,5 @@ fun AriaTheme(
         content = content
     )
 }
+
+

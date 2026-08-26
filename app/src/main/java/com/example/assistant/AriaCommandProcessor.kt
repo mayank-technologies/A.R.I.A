@@ -7,6 +7,7 @@ import android.util.Log
 import com.example.api.GeminiClient
 import com.example.api.WeatherClient
 import com.example.api.WikipediaClient
+import com.example.assistant.battery.AriaBatterySaverManager
 import com.example.data.AriaDao
 import com.example.data.ReminderEntity
 import com.example.data.VoiceHistoryEntity
@@ -273,6 +274,29 @@ class AriaCommandProcessor(
                     return@withContext AriaCommandResult.TextResponse(contactsRes.message, "CONTACTS")
                 }
             }
+        }
+
+        // 0.998 Battery Saver & Power Optimization Commands
+        if (queryLower.contains("battery saver") || queryLower.contains("power saver") ||
+            queryLower.contains("battery status") || queryLower.contains("battery percentage") ||
+            queryLower.contains("battery kitna") || queryLower.contains("battery kitni") ||
+            queryLower.contains("battery level") || queryLower.contains("save battery") ||
+            queryLower.contains("power mode")
+        ) {
+            val reply = if (queryLower.contains("on") || queryLower.contains("enable") || queryLower.contains("chalu") || queryLower.contains("start")) {
+                AriaBatterySaverManager.setManualOverride(true, context)
+                "Boss, Battery Saver mode ON kar diya gaya hai! 🔋⚡ Background sync frequency limit ho gayi hai aur UI/HUD animations pause ho chuki hain."
+            } else if (queryLower.contains("off") || queryLower.contains("disable") || queryLower.contains("band") || queryLower.contains("stop")) {
+                AriaBatterySaverManager.setManualOverride(false, context)
+                "Battery Saver mode OFF kar diya gaya hai. Background sync and full reactive animations normal chal rahe hain, Boss! ⚡"
+            } else if (queryLower.contains("auto")) {
+                AriaBatterySaverManager.resetToAutoMode(context)
+                "Battery Saver AUTO mode par switch kar diya hai. Battery 20% se kam hone par automatically activate ho jayega. 🔋"
+            } else {
+                AriaBatterySaverManager.getStatusSummary()
+            }
+            saveHistory(userQuery, reply, "BATTERY")
+            return@withContext AriaCommandResult.TextResponse(reply, "BATTERY")
         }
 
         // 1. Time & Date commands

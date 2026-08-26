@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,10 +26,19 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import com.example.ui.AssistantStatus
+import com.example.ui.theme.CarbonBlack
+import com.example.ui.theme.ReactorGold
+import com.example.ui.theme.CobaltTech
+import com.example.ui.theme.HologramBlue
+import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.CyberCyan
+import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricEmerald
-import com.example.ui.theme.NeonPurple
+import com.example.ui.theme.LuminousIris
+import com.example.ui.theme.HologramBlue
+import com.example.ui.theme.ElectricCyan
+import com.example.ui.theme.SoftPink
 import com.example.ui.theme.WarningAmber
 import kotlin.math.cos
 import kotlin.math.sin
@@ -41,113 +51,133 @@ import kotlin.math.sin
  * 3. Dual counter-rotating concentric arc rings.
  * 4. Dynamic audio-reactive pulse wave animation based on AssistantStatus.
  * 5. High-intensity glowing energy core with lens flare halo.
+ * 6. Battery Saver Mode: Disables high-frequency infinite animations to conserve CPU/GPU energy.
  */
 @Composable
 fun ArcReactorVisualizer(
     status: AssistantStatus,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    disableAnimations: Boolean = false
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "ArcReactorHUD")
+    val clockwiseAngle: Float
+    val counterClockwiseAngle: Float
+    val pulseScale: Float
+    val listeningWaveRadius: Float
 
-    // Rotation Speeds
-    val mainRotationDuration = when (status) {
-        AssistantStatus.LISTENING -> 2000
-        AssistantStatus.PROCESSING -> 1200
-        AssistantStatus.SLEEP -> 20000
-        else -> 6000
+    if (!disableAnimations) {
+        val infiniteTransition = rememberInfiniteTransition(label = "ArcReactorHUD")
+
+        // Rotation Speeds
+        val mainRotationDuration = when (status) {
+            AssistantStatus.LISTENING -> 2000
+            AssistantStatus.PROCESSING -> 1200
+            AssistantStatus.SLEEP -> 20000
+            else -> 6000
+        }
+        val cw by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = mainRotationDuration, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "ClockwiseAngle"
+        )
+        clockwiseAngle = cw
+
+        val ccw by infiniteTransition.animateFloat(
+            initialValue = 360f,
+            targetValue = 0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = (mainRotationDuration * 1.4f).toInt(), easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "CounterClockwiseAngle"
+        )
+        counterClockwiseAngle = ccw
+
+        // Pulse Scale & Audio Reactivity
+        val pulseMin = when (status) {
+            AssistantStatus.LISTENING -> 0.75f
+            AssistantStatus.PROCESSING -> 0.82f
+            AssistantStatus.SLEEP -> 0.95f
+            else -> 0.88f
+        }
+        val pulseMax = when (status) {
+            AssistantStatus.LISTENING -> 1.38f
+            AssistantStatus.PROCESSING -> 1.22f
+            AssistantStatus.SLEEP -> 1.05f
+            else -> 1.12f
+        }
+        val pulseDuration = when (status) {
+            AssistantStatus.LISTENING -> 500
+            AssistantStatus.PROCESSING -> 700
+            AssistantStatus.SLEEP -> 3000
+            else -> 1200
+        }
+
+        val ps by infiniteTransition.animateFloat(
+            initialValue = pulseMin,
+            targetValue = pulseMax,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = pulseDuration, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "PulseScale"
+        )
+        pulseScale = ps
+
+        // Expanding Audio Waves for Listening Mode
+        val lwr by infiniteTransition.animateFloat(
+            initialValue = 0.8f,
+            targetValue = 1.55f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 900, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "ListeningWaveRadius"
+        )
+        listeningWaveRadius = lwr
+    } else {
+        // Static energy-efficient values in Battery Saver mode
+        clockwiseAngle = 45f
+        counterClockwiseAngle = 225f
+        pulseScale = 1.0f
+        listeningWaveRadius = 1.0f
     }
-    val clockwiseAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = mainRotationDuration, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "ClockwiseAngle"
-    )
 
-    val counterClockwiseAngle by infiniteTransition.animateFloat(
-        initialValue = 360f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = (mainRotationDuration * 1.4f).toInt(), easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "CounterClockwiseAngle"
-    )
-
-    // Pulse Scale & Audio Reactivity
-    val pulseMin = when (status) {
-        AssistantStatus.LISTENING -> 0.75f
-        AssistantStatus.PROCESSING -> 0.82f
-        AssistantStatus.SLEEP -> 0.95f
-        else -> 0.88f
-    }
-    val pulseMax = when (status) {
-        AssistantStatus.LISTENING -> 1.38f
-        AssistantStatus.PROCESSING -> 1.22f
-        AssistantStatus.SLEEP -> 1.05f
-        else -> 1.12f
-    }
-    val pulseDuration = when (status) {
-        AssistantStatus.LISTENING -> 500
-        AssistantStatus.PROCESSING -> 700
-        AssistantStatus.SLEEP -> 3000
-        else -> 1200
-    }
-
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = pulseMin,
-        targetValue = pulseMax,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = pulseDuration, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "PulseScale"
-    )
-
-    // Expanding Audio Waves for Listening Mode
-    val listeningWaveRadius by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.55f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "ListeningWaveRadius"
-    )
-
-    // Core Theme Color Palette based on Assistant State
+    // Core Theme Color Palette based on Assistant State (JARVIS / Iron Man Tech)
     val coreColor = when (status) {
-        AssistantStatus.IDLE -> CyberCyan
-        AssistantStatus.LISTENING -> WarningAmber
-        AssistantStatus.PROCESSING -> NeonPurple
+        AssistantStatus.IDLE -> ElectricCyan
+        AssistantStatus.LISTENING -> ReactorGold
+        AssistantStatus.PROCESSING -> HologramBlue
         AssistantStatus.SPEAKING -> ElectricEmerald
-        AssistantStatus.SLEEP -> Color(0xFF64748B)
+        AssistantStatus.SLEEP -> Color(0xFF475569)
     }
 
     val secondaryColor = when (status) {
-        AssistantStatus.LISTENING -> CyberCyan
-        AssistantStatus.PROCESSING -> CyberCyan
-        else -> ElectricBlue
+        AssistantStatus.LISTENING -> ReactorGold
+        AssistantStatus.PROCESSING -> ElectricCyan
+        AssistantStatus.SPEAKING -> HologramBlue
+        else -> CobaltTech
     }
 
     Box(
         modifier = modifier
-            .size(220.dp)
+            .size(130.dp)
             .clipToBounds(),
         contentAlignment = Alignment.Center
     ) {
         Canvas(
             modifier = Modifier
-                .size(220.dp)
+                .fillMaxSize()
                 .clipToBounds()
         ) {
             val center = Offset(size.width / 2, size.height / 2)
             val baseRadius = size.width / 3.2f
 
             // 1. Background A.I. Grid & Crosshair Lines (Blueprint Texture)
-            val gridColor = CyberCyan.copy(alpha = 0.08f)
+            val gridColor = ElectricCyan.copy(alpha = 0.08f)
             val dashedStroke = Stroke(width = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f))
             
             // Horizontal & Vertical Crosshair
@@ -166,7 +196,7 @@ fun ArcReactorVisualizer(
 
             // Outer Target Reticle Box
             drawCircle(
-                color = CyberCyan.copy(alpha = 0.06f),
+                color = ElectricCyan.copy(alpha = 0.06f),
                 radius = baseRadius * 1.55f,
                 center = center,
                 style = dashedStroke
@@ -176,13 +206,13 @@ fun ArcReactorVisualizer(
             if (status == AssistantStatus.LISTENING) {
                 val waveAlpha = (1.55f - listeningWaveRadius).coerceIn(0f, 0.85f)
                 drawCircle(
-                    color = WarningAmber.copy(alpha = waveAlpha),
+                    color = ReactorGold.copy(alpha = waveAlpha),
                     radius = baseRadius * listeningWaveRadius,
                     center = center,
                     style = Stroke(width = 2.dp.toPx())
                 )
                 drawCircle(
-                    color = CyberCyan.copy(alpha = waveAlpha * 0.6f),
+                    color = ElectricCyan.copy(alpha = waveAlpha * 0.6f),
                     radius = baseRadius * (listeningWaveRadius * 0.85f),
                     center = center,
                     style = Stroke(width = 1.5.dp.toPx())

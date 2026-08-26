@@ -58,7 +58,7 @@ import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.DeepSpace
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricEmerald
-import com.example.ui.theme.NeonPurple
+import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.SurfaceVariantDark
 import com.example.ui.theme.TextPrimary
@@ -95,8 +95,14 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import com.example.assistant.battery.AriaBatterySaverManager
 
 @Composable
 fun QuickToolsScreen(
@@ -110,6 +116,11 @@ fun QuickToolsScreen(
     val isGlowActive by AriaEdgeGlowOverlayManager.isGlowActive.collectAsState()
     val isNothingPhone by AriaGlyphHardwareManager.isNothingPhone.collectAsState()
     val isAccessibilityActive by AriaAccessibilityGestureService.isServiceEnabled.collectAsState()
+
+    val isBatterySaverActive by AriaBatterySaverManager.isBatterySaverActive.collectAsState()
+    val batteryLevel by AriaBatterySaverManager.batteryLevel.collectAsState()
+    val isCharging by AriaBatterySaverManager.isCharging.collectAsState()
+    val manualOverride by AriaBatterySaverManager.manualOverride.collectAsState()
 
     var showDeveloperHubDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
@@ -735,6 +746,175 @@ fun QuickToolsScreen(
             }
         }
 
+        // Battery Saver & Power Optimization Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                shape = RoundedCornerShape(20.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isBatterySaverActive) WarningAmber else CyberCyan.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(
+                                    if (isBatterySaverActive) WarningAmber.copy(alpha = 0.2f)
+                                    else if (isCharging) ElectricEmerald.copy(alpha = 0.2f)
+                                    else CyberCyan.copy(alpha = 0.15f),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isCharging) Icons.Default.BatteryChargingFull
+                                else if (isBatterySaverActive || batteryLevel <= 20) Icons.Default.BatteryAlert
+                                else Icons.Default.BatteryFull,
+                                contentDescription = "Battery Saver",
+                                tint = if (isBatterySaverActive) WarningAmber
+                                else if (isCharging) ElectricEmerald
+                                else CyberCyan,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "🔋 Battery Saver Mode ($batteryLevel%)",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isBatterySaverActive) WarningAmber.copy(alpha = 0.2f)
+                                            else ElectricEmerald.copy(alpha = 0.2f)
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isBatterySaverActive) "SAVER ON (<20%)" else "NORMAL",
+                                        color = if (isBatterySaverActive) WarningAmber else ElectricEmerald,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            Text(
+                                text = if (isBatterySaverActive)
+                                    "Power-saving active: sync throttled & HUD animations paused"
+                                else
+                                    "Automatically throttles sync & pauses animations below 20%",
+                                color = if (isBatterySaverActive) WarningAmber else TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Mode switch buttons (Auto / Force ON / Force OFF)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val isAuto = manualOverride == null
+                        Button(
+                            onClick = {
+                                AriaBatterySaverManager.resetToAutoMode(context)
+                                Toast.makeText(context, "Battery Saver set to AUTO mode (<20%)", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isAuto) CyberCyan.copy(alpha = 0.3f) else SurfaceVariantDark
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isAuto) CyberCyan else Color.Transparent)
+                        ) {
+                            Text("Auto (<20%)", fontSize = 11.sp, color = if (isAuto) CyberCyan else TextSecondary, fontWeight = FontWeight.Bold)
+                        }
+
+                        val isForceOn = manualOverride == true
+                        Button(
+                            onClick = {
+                                AriaBatterySaverManager.setManualOverride(true, context)
+                                Toast.makeText(context, "Battery Saver FORCED ON", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isForceOn) WarningAmber.copy(alpha = 0.3f) else SurfaceVariantDark
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isForceOn) WarningAmber else Color.Transparent)
+                        ) {
+                            Text("Force ON", fontSize = 11.sp, color = if (isForceOn) WarningAmber else TextSecondary, fontWeight = FontWeight.Bold)
+                        }
+
+                        val isForceOff = manualOverride == false
+                        Button(
+                            onClick = {
+                                AriaBatterySaverManager.setManualOverride(false, context)
+                                Toast.makeText(context, "Battery Saver FORCED OFF", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isForceOff) ElectricEmerald.copy(alpha = 0.3f) else SurfaceVariantDark
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isForceOff) ElectricEmerald else Color.Transparent)
+                        ) {
+                            Text("Off", fontSize = 11.sp, color = if (isForceOff) ElectricEmerald else TextSecondary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Protections Breakdown
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(SurfaceVariantDark.copy(alpha = 0.5f))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "⚡ Optimizations in effect when active:",
+                            color = CyberCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "• Background speech loop throttles delay to 3,500ms+ (prevents CPU drain).",
+                            color = TextSecondary,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = "• Arc Reactor HUD, pulse rings & Edge Glow pause continuous GPU drawing.",
+                            color = TextSecondary,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = "• Say voice command: 'Battery saver on/off' or 'Battery status'.",
+                            color = TextSecondary,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+        }
+
         // Voice Gesture Automation (Accessibility Service) Card
         item {
             Card(
@@ -1227,7 +1407,7 @@ fun QuickToolsScreen(
                         Icon(
                             imageVector = Icons.Default.Calculate,
                             contentDescription = "Calculator",
-                            tint = NeonPurple,
+                            tint = ElectricCyan,
                             modifier = Modifier.size(24.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1272,7 +1452,7 @@ fun QuickToolsScreen(
                                     "Error"
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = NeonPurple),
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Text(text = "=", fontSize = 16.sp, fontWeight = FontWeight.Bold)

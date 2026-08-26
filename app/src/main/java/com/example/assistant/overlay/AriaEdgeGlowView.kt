@@ -11,6 +11,7 @@ import android.graphics.Shader
 import android.graphics.SweepGradient
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
+import com.example.assistant.battery.AriaBatterySaverManager
 
 /**
  * Custom Floating Edge Glow View.
@@ -19,6 +20,7 @@ import android.view.animation.AccelerateDecelerateInterpolator
  *
  * Designed to be used with SYSTEM_ALERT_WINDOW and FLAG_NOT_TOUCHABLE so normal phone
  * usage is never obstructed.
+ * Honors Battery Saver mode by disabling continuous GPU sweep animators when active.
  */
 class AriaEdgeGlowView(context: Context) : View(context) {
 
@@ -60,7 +62,11 @@ class AriaEdgeGlowView(context: Context) : View(context) {
     init {
         // Transparent background so only the outer edge glow is visible
         setBackgroundColor(Color.TRANSPARENT)
-        startGlowAnimations()
+        if (!AriaBatterySaverManager.shouldDisableAnimations()) {
+            startGlowAnimations()
+        } else {
+            pulseAlpha = 0.85f
+        }
     }
 
     fun setState(state: GlowState) {

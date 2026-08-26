@@ -48,7 +48,7 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.DeepSpace
 import com.example.ui.theme.ElectricEmerald
-import com.example.ui.theme.NeonPurple
+import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -811,12 +811,12 @@ suspend fun sendCommandToPythonBackend(userQuery: String): String {
             Card(
                 colors = CardDefaults.cardColors(containerColor = SurfaceDark),
                 shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, NeonPurple.copy(alpha = 0.3f))
+                border = androidx.compose.foundation.BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.3f))
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
                         text = "📡 Mobile ↔ Python Backend Sync Architecture",
-                        color = NeonPurple,
+                        color = ElectricCyan,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1786,7 +1786,7 @@ class _HomeScreenState extends State<HomeScreen> {
         item {
             Text(
                 text = "4. lib/screens/home_screen.dart (Personalized Greetings with Name)",
-                color = NeonPurple,
+                color = ElectricCyan,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
@@ -2234,7 +2234,7 @@ class NothingGlyphController(context: Context) {
         item {
             Text(
                 text = "4. lib/overlay/aria_edge_glow_overlay.dart (Breathing Cyan Edge Glow)",
-                color = NeonPurple,
+                color = ElectricCyan,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace

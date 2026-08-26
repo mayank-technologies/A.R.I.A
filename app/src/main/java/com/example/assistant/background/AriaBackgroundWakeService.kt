@@ -24,6 +24,7 @@ import com.example.MainActivity
 import com.example.R
 import com.example.assistant.AriaCommandProcessor
 import com.example.assistant.AriaCommandResult
+import com.example.assistant.battery.AriaBatterySaverManager
 import com.example.assistant.glyph.AriaGlyphHardwareManager
 import com.example.assistant.overlay.AriaEdgeGlowOverlayManager
 import com.example.assistant.overlay.AriaEdgeGlowView
@@ -327,9 +328,10 @@ class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
     private fun restartListeningAfterDelay(delayMs: Long) {
         if (!_isRunning.value || isProcessingCommand) return
         mainHandler.removeCallbacksAndMessages(null)
+        val effectiveDelay = AriaBatterySaverManager.getBackgroundWakeDelay(delayMs)
         mainHandler.postDelayed({
             startListeningLoop()
-        }, delayMs)
+        }, effectiveDelay)
     }
 
     override fun onInit(status: Int) {

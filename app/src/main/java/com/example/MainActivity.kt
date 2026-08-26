@@ -89,6 +89,9 @@ class MainActivity : ComponentActivity() {
         // Initialize Notification Channel for scheduled reminders & weather
         com.example.notification.AriaNotificationScheduler.createNotificationChannel(this)
 
+        // Initialize Battery Saver & Power Optimization Manager (<20% Auto Threshold)
+        com.example.assistant.battery.AriaBatterySaverManager.init(this)
+
         // Schedule daily morning weather briefing notification at 8:00 AM
         com.example.notification.AriaNotificationScheduler.scheduleDailyMorningWeatherNotification(this, hourOfDay = 8, minute = 0)
 

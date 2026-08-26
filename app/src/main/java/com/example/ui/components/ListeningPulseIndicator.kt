@@ -47,94 +47,124 @@ import com.example.ui.theme.WarningAmber
 @Composable
 fun ListeningPulseIndicator(
     isListening: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    disableAnimations: Boolean = false
 ) {
     if (!isListening) return
 
-    val infiniteTransition = rememberInfiniteTransition(label = "ListeningPulseTransition")
+    val ripple1Scale: Float
+    val ripple1Alpha: Float
+    val ripple2Scale: Float
+    val ripple2Alpha: Float
+    val bar1Height: Float
+    val bar2Height: Float
+    val bar3Height: Float
+    val bar4Height: Float
 
-    // Animated ripple expanding circle 1
-    val ripple1Scale by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 2.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "Ripple1Scale"
-    )
+    if (!disableAnimations) {
+        val infiniteTransition = rememberInfiniteTransition(label = "ListeningPulseTransition")
 
-    val ripple1Alpha by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 0.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = FastOutLinearInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "Ripple1Alpha"
-    )
+        // Animated ripple expanding circle 1
+        val r1s by infiniteTransition.animateFloat(
+            initialValue = 0.8f,
+            targetValue = 2.2f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "Ripple1Scale"
+        )
+        ripple1Scale = r1s
 
-    // Animated ripple expanding circle 2 (offset)
-    val ripple2Scale by infiniteTransition.animateFloat(
-        initialValue = 0.5f,
-        targetValue = 1.7f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, delayMillis = 600, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "Ripple2Scale"
-    )
+        val r1a by infiniteTransition.animateFloat(
+            initialValue = 0.8f,
+            targetValue = 0.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1800, easing = FastOutLinearInEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "Ripple1Alpha"
+        )
+        ripple1Alpha = r1a
 
-    val ripple2Alpha by infiniteTransition.animateFloat(
-        initialValue = 0.7f,
-        targetValue = 0.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, delayMillis = 600, easing = FastOutLinearInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "Ripple2Alpha"
-    )
+        // Animated ripple expanding circle 2 (offset)
+        val r2s by infiniteTransition.animateFloat(
+            initialValue = 0.5f,
+            targetValue = 1.7f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1800, delayMillis = 600, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "Ripple2Scale"
+        )
+        ripple2Scale = r2s
 
-    // Sound wave bar heights
-    val bar1Height by infiniteTransition.animateFloat(
-        initialValue = 6f,
-        targetValue = 28f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "Bar1"
-    )
+        val r2a by infiniteTransition.animateFloat(
+            initialValue = 0.7f,
+            targetValue = 0.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1800, delayMillis = 600, easing = FastOutLinearInEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "Ripple2Alpha"
+        )
+        ripple2Alpha = r2a
 
-    val bar2Height by infiniteTransition.animateFloat(
-        initialValue = 12f,
-        targetValue = 36f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 420, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "Bar2"
-    )
+        // Sound wave bar heights
+        val b1 by infiniteTransition.animateFloat(
+            initialValue = 6f,
+            targetValue = 28f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "Bar1"
+        )
+        bar1Height = b1
 
-    val bar3Height by infiniteTransition.animateFloat(
-        initialValue = 8f,
-        targetValue = 32f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 250, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "Bar3"
-    )
+        val b2 by infiniteTransition.animateFloat(
+            initialValue = 12f,
+            targetValue = 36f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "Bar2"
+        )
+        bar2Height = b2
 
-    val bar4Height by infiniteTransition.animateFloat(
-        initialValue = 14f,
-        targetValue = 24f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 380, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "Bar4"
-    )
+        val b3 by infiniteTransition.animateFloat(
+            initialValue = 8f,
+            targetValue = 32f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "Bar3"
+        )
+        bar3Height = b3
+
+        val b4 by infiniteTransition.animateFloat(
+            initialValue = 14f,
+            targetValue = 24f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 380, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "Bar4"
+        )
+        bar4Height = b4
+    } else {
+        // Static values in battery saver mode
+        ripple1Scale = 1.0f
+        ripple1Alpha = 0.3f
+        ripple2Scale = 1.3f
+        ripple2Alpha = 0.15f
+        bar1Height = 16f
+        bar2Height = 24f
+        bar3Height = 18f
+        bar4Height = 20f
+    }
 
     Box(
         modifier = modifier

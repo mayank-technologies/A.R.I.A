@@ -2,21 +2,48 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Iron Man / JARVIS Futuristic A.I. Color Palette
-val CyberCyan = Color(0xFF00E5FF)          // Electric Cyan (Primary HUD Accent)
-val ElectricBlue = Color(0xFF0088FF)       // Vibrant Cyan-Blue Accent
-val DeepSpace = Color(0xFF030712)          // Pitch Obsidian Black Background
-val SurfaceDark = Color(0xD90F172A)        // Semi-transparent Dark Slate Glass
-val SurfaceVariantDark = Color(0x3300E5FF) // Thin Glowing Cyan Border Tint
-val NeonPurple = Color(0xFFA855F7)         // Deep Cyber Violet Accent
-val ElectricEmerald = Color(0xFF10B981)     // Status Emerald Green
-val WarningAmber = Color(0xFFF59E0B)        // Active Listening Amber/Gold Arc Glow
-val TextPrimary = Color(0xFFF1F5F9)        // Clean White High-Contrast Text
-val TextSecondary = Color(0xFF94A3B8)      // Muted Tech Slate Text
+// =======================================================================
+// CLASSIC JARVIS / IRON-MAN ARC-REACTOR HIGH-TECH HUD COLOR PALETTE
+// Sharp, metallic, high-tech, masculine futuristic HUD aesthetic
+// Pitch Charcoal Black + Electric Arc Cyan + Hologram Blue + Reactor Gold
+// =======================================================================
 
-// Glassmorphism Utility Colors
-val GlassBorderCyan = Color(0x4000E5FF)    // 1px Glowing Cyan Border
-val GlassBorderPurple = Color(0x30A855F7)  // 1px Glowing Purple Border
-val GlassBackground = Color(0x220F172A)    // Backdrop Glass Tint
+// Primary Hologram & Arc Reactor Accents
+val ElectricCyan = Color(0xFF00E5FF)       // Classic JARVIS Arc Reactor Electric Cyan (Primary HUD Accent)
+val CyberCyan = ElectricCyan               // Aliased for seamless compatibility
+val HologramBlue = Color(0xFF38BDF8)       // Vivid Holographic Sky Blue (Secondary Tech Accent)
+val CobaltTech = Color(0xFF0284C7)         // Deep Titanium Cobalt Blue (Tertiary Accent)
+val ReactorGold = Color(0xFFF59E0B)        // Iron-Man Arc Reactor Gold / Amber (Active Mode / Power Core)
+val WarningAmber = ReactorGold             // Status Amber / Active Listening Indicator
+val ElectricEmerald = Color(0xFF00FF9D)    // High-tech Laser Emerald (Online Status & Health)
+val ElectricBlue = Color(0xFF0284C7)       // Deep Electric Blue
+
+// Aliases for legacy references to ensure zero purple/pink tones remain
+val CyberViolet = ElectricCyan             // Remapped to Electric Cyan
+val NeonPurple = ElectricCyan              // Remapped to Electric Cyan
+val NeonPink = HologramBlue                // Remapped to Hologram Blue
+val SoftPink = CobaltTech                  // Remapped to Cobalt Tech
+val LuminousIris = HologramBlue            // Remapped to Hologram Blue
+
+// Dark Titanium & Charcoal Obsidian Canvas Surfaces
+val DeepSpace = Color(0xFF040711)          // Deep Charcoal Obsidian / Carbon Black Canvas
+val CarbonBlack = Color(0xFF070C18)        // Layered Deep Titanium Carbon
+val SurfaceDark = Color(0xF00A101F)        // Translucent Dark Steel Slate Glass (#0A101F)
+val SurfaceVariantDark = Color(0x3300E5FF) // Glowing Cyan HUD Border Tint
+val DarkTitanium = Color(0xFF0F172A)       // Dark Slate Titanium Card Container
+
+// High-Contrast Clean Tech Typography
+val TextPrimary = Color(0xFFF8FAFC)        // Pure Crisp Ice White
+val TextSecondary = Color(0xFF94A3B8)      // Muted Titanium Steel Slate
+val TextMuted = Color(0xFF64748B)          // Deep Slate Gray for Timestamps & Blueprint Details
+
+// Precision HUD Glassmorphism & Neon Glow Stroke Borders
+val GlassBorderCyan = Color(0x4D00E5FF)    // 1px Glowing Electric Cyan HUD Border
+val GlassBorderPurple = GlassBorderCyan    // Remapped to Electric Cyan Border
+val GlassBorderPink = Color(0x4038BDF8)    // Remapped to Hologram Blue Border
+val GlassBorderBlue = Color(0x4038BDF8)    // 1px Hologram Blue Border
+val GlassBackground = Color(0x330A1428)    // Semi-transparent Charcoal Steel Glass Backdrop
+
+
 
 
