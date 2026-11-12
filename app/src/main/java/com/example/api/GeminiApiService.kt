@@ -64,19 +64,19 @@ object GeminiClient {
     suspend fun queryAriaAi(prompt: String): String {
         val apiKey = BuildConfig.GEMINI_API_KEY
         if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
-            return "A.R.I.A. AI mode active: I can help answer questions, calculate math, check weather, set reminders, and explain Python code!"
+            return "ARC AI mode active: I can help answer questions, calculate math, check weather, set reminders, and explain Python code!"
         }
         val request = GeminiRequest(
             contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = prompt)))),
             systemInstruction = GeminiContent(
-                parts = listOf(GeminiPart(text = "You are ARIA (Autonomous Reactive Intelligent Assistant), a JARVIS-inspired voice assistant. Keep answers concise, helpful, and friendly (2-3 sentences max unless explaining code).")))
+                parts = listOf(GeminiPart(text = "You are ARC (Autonomous Reactive Core), a JARVIS-inspired voice assistant. Your name is ARC. Keep answers concise, helpful, and friendly (2-3 sentences max unless explaining code).")))
         )
         return try {
             val res = service.generateContent(apiKey, request)
             res.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 ?: "I processed your request, Boss."
         } catch (e: Exception) {
-            "ARIA AI: ${e.localizedMessage ?: "Connection error. Reverting to local ARIA modules."}"
+            "ARC AI: ${e.localizedMessage ?: "Connection error. Reverting to local ARIA modules."}"
         }
     }
 }

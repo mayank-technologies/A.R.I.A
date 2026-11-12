@@ -94,7 +94,7 @@ fun RemindersScreen(
             Spacer(modifier = Modifier.width(10.dp))
             Column {
                 Text(
-                    text = "A.R.I.A. Reminders",
+                    text = "ARC Reminders",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary

@@ -193,7 +193,7 @@ fun StepByStepGuideView() {
         item {
             GuideStepCard(
                 stepNumber = "3",
-                title = "Customizable Wake Word (Hey ARIA / Jarvis / Computer)",
+                title = "Customizable Wake Word (Hey ARC / Jarvis / Computer)",
                 description = "Wake Word customize karo (e.g. 'hey aria', 'computer', 'execute'). ARIA continuous background audio monitor karega aur sirf wake word sunne ke baad command listen karega.",
                 command = "# Python script me WAKE_WORDS = ['hey aria', 'computer', 'jarvis'] set karo"
             )
@@ -282,7 +282,7 @@ fun PythonCodeView(context: Context) {
 # A.R.I.A. (Automated Responsive Intelligent Assistant) - FULL PYTHON BACKEND
 # ==============================================================================
 # Features Included:
-#  1. 🎙️ Customizable Wake Word Detection ('Hey ARIA', 'Computer', 'Jarvis', etc.)
+#  1. 🎙️ Customizable Wake Word Detection ('Hey ARC', 'Computer', 'Jarvis', etc.)
 #  2. 🧠 Lightweight Conversational AI (Local NLP Intent Matcher + LLM Fallback)
 #  3. 🎩 JARVIS-style Sophisticated, Polite & Witty Personality
 #  4. 🔊 Text-To-Speech (pyttsx3) & Speech-To-Text (speech_recognition)
@@ -313,11 +313,11 @@ except ImportError:
 # Simply modify the 'ACTIVE_WAKE_WORD' variable below or add your favorite aliases
 # to the 'WAKE_WORD_ALIASES' list (e.g. 'computer', 'jarvis', 'friday', 'execute').
 
-ACTIVE_WAKE_WORD = "hey aria"  # Main trigger phrase (lowercase)
-WAKE_WORD_ALIASES = ["hey aria", "aria", "computer", "jarvis", "execute", "assistant"]
+ACTIVE_WAKE_WORD = "hey arc"  # Main trigger phrase (lowercase)
+WAKE_WORD_ALIASES = ["hey arc", "arc", "hey aria", "aria", "computer", "jarvis", "execute", "assistant"]
 
 # Assistant Identity Settings
-ASSISTANT_NAME = "A.R.I.A."
+ASSISTANT_NAME = "ARC"
 USER_NAME = "Boss"  # Customize to your name (e.g. "Sir", "Mayank", "Boss")
 
 # ------------------------------------------------------------------------------
@@ -723,7 +723,7 @@ WAKE_WORD_ALIASES = ["computer", "hey computer", "pc"]
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "• Set any custom trigger phrase like 'Hey ARIA', 'Computer', 'Jarvis', or 'Execute'.\n" +
+                        text = "• Set any custom trigger phrase like 'Hey ARC', 'Computer', 'Jarvis', or 'Execute'.\n" +
                                 "• Zero false triggers: Assistant stays in low-resource standby until the exact trigger phrase is heard.\n" +
                                 "• Once triggered, ARIA acknowledges with a snappy response ('At your service, Boss') and captures your command.",
                         color = TextPrimary,
@@ -894,7 +894,7 @@ flutter:
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
-        android:label="A.R.I.A."
+        android:label="ARC"
         android:icon="@mipmap/ic_launcher">
         
         <activity
@@ -971,7 +971,7 @@ class AriaWakeWordTaskHandler extends TaskHandler {
             _isProcessing = false;
             FlutterForegroundTask.updateService(
               notificationTitle: "ARIA Background Service",
-              notificationText: "Listening for 'Hey Aria'...",
+              notificationText: "Listening for 'Hey ARC'...",
             );
           }
         },
@@ -1029,7 +1029,7 @@ class AriaWakeWordTaskHandler extends TaskHandler {
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "1. Picovoice Porcupine Engine: Phone screen off/locked hone par bhi low-power local wake word detection karta hai ('Hey Aria').\n" +
+                        text = "1. Picovoice Porcupine Engine: Phone screen off/locked hone par bhi low-power local wake word detection karta hai ('Hey ARC').\n" +
                                 "2. Android Foreground Service: Persistent Notification ke saath service background me live rehti hai bina OS kill kiye.\n" +
                                 "3. Battery Optimization Exemption: `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission se app Doze mode me sleep nahi hoti.\n" +
                                 "4. Command Capture: Wake word milte hi Native Speech-To-Text active hota hai, command capture karta hai aur Python Flask API ko bhejta hai!",
@@ -1445,7 +1445,7 @@ class AriaApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'A.R.I.A. Assistant',
+      title: 'ARC Assistant',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF030712), // DeepSpace background
@@ -1509,7 +1509,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     await prefs.setString('user_name', name);
 
     // 2. Speak personalized welcome message
-    String welcomeSpeech = "Nice to meet you, ${'$'}name! I'm A.R.I.A., your personal assistant.";
+    String welcomeSpeech = "Nice to meet you, ${'$'}name! I'm ARC, your personal assistant.";
     await _flutterTts.speak(welcomeSpeech);
 
     // Wait slightly for voice greeting to initiate
@@ -1562,7 +1562,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               const SizedBox(height: 32),
 
               const Text(
-                "A.R.I.A. ONLINE",
+                "ARC ONLINE",
                 style: TextStyle(
                   color: cyberCyan,
                   fontSize: 22,
@@ -1846,7 +1846,7 @@ flutter:
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
-        android:label="A.R.I.A."
+        android:label="ARC"
         android:name="${'$'}{applicationName}"
         android:icon="@mipmap/ic_launcher">
 
@@ -1907,7 +1907,7 @@ class AriaBackgroundService {
         isForegroundMode: true,
         notificationChannelId: 'aria_background_wake_channel',
         initialNotificationTitle: 'A.R.I.A. Background Voice Engine Active',
-        initialNotificationContent: "Listening for 'Hey ARIA' • Edge Glow Active",
+        initialNotificationContent: "Listening for 'Hey ARC' • Edge Glow Active",
         foregroundServiceNotificationId: 888,
       ),
       iosConfiguration: IosConfiguration(
@@ -1937,7 +1937,7 @@ class AriaBackgroundService {
 
       porcupineManager = await PorcupineManager.fromBuiltInKeywords(
         picovoiceAccessKey,
-        [BuiltInKeyword.JARVIS, BuiltInKeyword.COMPUTER], // Or custom 'Hey ARIA' .ppn model
+        [BuiltInKeyword.JARVIS, BuiltInKeyword.COMPUTER], // Or custom 'Hey ARC' .ppn model
         (int keywordIndex) async {
           // ===========================================================
           // 🎯 WAKE WORD DETECTED IN BACKGROUND!
@@ -2158,7 +2158,7 @@ class NothingGlyphController(context: Context) {
                     Text(
                         text = "1. Background Listening: Uses an Android Foreground Service with Picovoice Porcupine wake-word engine. Stays alive 24/7 with zero battery drain.\n" +
                                 "2. Screen Edge Glow Overlay: Uses SYSTEM_ALERT_WINDOW with FLAG_NOT_TOUCHABLE so a subtle glowing cyan border pulses along the screen edges without blocking clicks or touches on other apps.\n" +
-                                "3. Automatic Lifecycle: Activates immediately on 'Hey ARIA', transitions to speaking glow, and disappears smoothly when ARIA finishes responding.\n" +
+                                "3. Automatic Lifecycle: Activates immediately on 'Hey ARC', transitions to speaking glow, and disappears smoothly when ARIA finishes responding.\n" +
                                 "4. Nothing Phone Glyph: Hardware LED integration for Nothing Phone users with automatic software glow fallback for all other Android smartphones.",
                         color = TextPrimary,
                         fontSize = 12.sp,
@@ -3040,7 +3040,7 @@ fun FlutterAccessibilityVoiceGesturesGuideView(context: Context) {
         <!-- ARIA Voice Gestures Accessibility Service -->
         <service
             android:name=".AriaAccessibilityGestureService"
-            android:label="A.R.I.A. Voice Gestures"
+            android:label="ARC Voice Gestures"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -3263,7 +3263,7 @@ class AriaAccessibilityService {
                                 "2. Voice Commands:\n" +
                                 "   • 'scroll this reel/shorts' -> Dispatches a bottom-to-top swipe path (260ms).\n" +
                                 "   • 'pause this video/reel' -> Dispatches a single tap at the center coordinate.\n" +
-                                "3. Background Wake Word Integration: User can be watching YouTube and say 'Hey ARIA, scroll this' hands-free!\n\n" +
+                                "3. Background Wake Word Integration: User can be watching YouTube and say 'Hey ARC, scroll this' hands-free!\n\n" +
                                 "⚠️ CRITICAL PLATFORM NOTE (Android vs iOS):\n" +
                                 "• ANDROID: Fully supports system-wide gesture automation via AccessibilityService.\n" +
                                 "• iOS (Apple): Strictly blocks third-party apps from simulating gestures or reading external app screens due to iOS sandbox security policy.\n\n" +

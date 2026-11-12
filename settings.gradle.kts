@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "ARIA Voice Assistant"
+rootProject.name = "ARC"
 
 include(":app")

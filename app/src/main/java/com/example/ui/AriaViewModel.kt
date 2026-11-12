@@ -46,6 +46,24 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     private val dao = db.ariaDao()
     private val commandProcessor = AriaCommandProcessor(application, dao)
     val speechEngine = AriaSpeechEngine(application)
+    val geminiLiveManager = com.example.geminilive.GeminiLiveVoiceManager(application)
+
+    private val _isGeminiLiveMode = MutableStateFlow(
+        prefs.getBoolean("arc_gemini_live_mode", false)
+    )
+    val isGeminiLiveMode: StateFlow<Boolean> = _isGeminiLiveMode.asStateFlow()
+
+    fun toggleGeminiLiveMode(): Boolean {
+        val newState = !_isGeminiLiveMode.value
+        _isGeminiLiveMode.value = newState
+        prefs.edit().putBoolean("arc_gemini_live_mode", newState).apply()
+        if (newState) {
+            geminiLiveManager.startLiveSession()
+        } else {
+            geminiLiveManager.stopLiveSession()
+        }
+        return newState
+    }
 
     private val _isInitializing = MutableStateFlow(true)
     val isInitializing: StateFlow<Boolean> = _isInitializing.asStateFlow()
@@ -73,8 +91,8 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         val newState = speechEngine.toggleWakeWordMode()
         prefs.edit().putBoolean("wake_word_enabled", newState).apply()
         if (newState) {
-            _latestResponse.value = "Wake-Word Detection Active 🎙️ Say 'Hey ARIA' anytime hands-free!"
-            speakResponse("Wake word detection active, Boss! Say Hey ARIA anytime.")
+            _latestResponse.value = "Wake-Word Detection Active 🎙️ Say 'Hey ARC' anytime hands-free!"
+            speakResponse("Wake word detection active, Boss! Say Hey ARC anytime.")
         } else {
             _latestResponse.value = "Wake-Word Detection Paused."
         }
@@ -90,7 +108,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     private val _assistantStatus = MutableStateFlow(AssistantStatus.IDLE)
     val assistantStatus: StateFlow<AssistantStatus> = _assistantStatus.asStateFlow()
 
-    private val _latestResponse = MutableStateFlow("Namaste Boss! Mai ARIA hu, aapka AI Voice Assistant.")
+    private val _latestResponse = MutableStateFlow("Namaste Boss! Mai ARC hu, aapka AI Voice Assistant.")
     val latestResponse: StateFlow<String> = _latestResponse.asStateFlow()
 
     private val _lastQuery = MutableStateFlow("")
@@ -107,11 +125,11 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _activityLogs = MutableStateFlow<List<ActivityLogItem>>(
         listOf(
-            ActivityLogItem(icon = "💬", title = "Response generated", detail = "ARIA core ready", timeAgo = "Just now"),
+            ActivityLogItem(icon = "💬", title = "Response generated", detail = "ARC core ready", timeAgo = "Just now"),
             ActivityLogItem(icon = "🎙️", title = "User spoke", detail = "Standing by for prompt", timeAgo = "1m ago"),
             ActivityLogItem(icon = "⚙️", title = "Planning response", detail = "Gemini LLM pipeline ready", timeAgo = "2m ago"),
-            ActivityLogItem(icon = "🟢", title = "ARIA online", detail = "Realtime link established", timeAgo = "3m ago"),
-            ActivityLogItem(icon = "🟢", title = "ARIA core online", detail = "All systems nominal", timeAgo = "4m ago")
+            ActivityLogItem(icon = "🟢", title = "ARC online", detail = "Realtime link established", timeAgo = "3m ago"),
+            ActivityLogItem(icon = "🟢", title = "ARC core online", detail = "All systems nominal", timeAgo = "4m ago")
         )
     )
     val activityLogs: StateFlow<List<ActivityLogItem>> = _activityLogs.asStateFlow()
@@ -119,13 +137,26 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     private val _memoryFacts = MutableStateFlow<List<MemoryFactItem>>(
         listOf(
             MemoryFactItem(key = "Operator Name", value = prefs.getString("user_name", "Boss") ?: "Boss", category = "Identity"),
-            MemoryFactItem(key = "Wake-Word State", value = "Hey ARIA (Hands-free active)", category = "Settings"),
+            MemoryFactItem(key = "Wake-Word State", value = "Hey ARC (Hands-free active)", category = "Settings"),
             MemoryFactItem(key = "Primary Voice", value = "ElevenLabs Neural Engine", category = "Speech"),
             MemoryFactItem(key = "Default Navigation", value = "Google Maps", category = "Apps"),
             MemoryFactItem(key = "System Preference", value = "Hinglish + English Bilingual", category = "Language")
         )
     )
     val memoryFacts: StateFlow<List<MemoryFactItem>> = _memoryFacts.asStateFlow()
+
+    private val _avatarForm = MutableStateFlow(
+        com.example.ui.components.AvatarForm.fromString(
+            prefs.getString("arc_avatar_form", com.example.ui.components.AvatarForm.CORE.name)
+        )
+    )
+    val avatarForm: StateFlow<com.example.ui.components.AvatarForm> = _avatarForm.asStateFlow()
+
+    fun setAvatarForm(form: com.example.ui.components.AvatarForm) {
+        _avatarForm.value = form
+        prefs.edit().putString("arc_avatar_form", form.name).apply()
+        android.util.Log.d("ARC_AVATAR", "Avatar form switched to: ${form.name} and persisted to prefs")
+    }
 
     init {
         checkOnboardingStatus()
@@ -149,7 +180,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
             if (isComplete) {
                 _latestResponse.value = "Namaste $savedName! Mai ARIA hu, aapka AI Voice Assistant."
             } else {
-                _latestResponse.value = "Namaste Boss! Mai ARIA hu, aapka AI Voice Assistant."
+                _latestResponse.value = "Namaste Boss! Mai ARC hu, aapka AI Voice Assistant."
             }
 
             _isInitializing.value = false
@@ -290,12 +321,12 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         }
         speechEngine.stopSpeaking()
         _assistantStatus.value = AssistantStatus.SLEEP
-        _latestResponse.value = "ARIA in low-power Standby Mode. Tap 'Wake Up' or Mic button to activate."
+        _latestResponse.value = "ARC in low-power Standby Mode. Tap 'Wake Up' or Mic button to activate."
     }
 
     fun wakeUp() {
         _assistantStatus.value = AssistantStatus.IDLE
-        speakResponse("ARIA active and ready, Boss!")
+        speakResponse("ARC active and ready, Boss!")
     }
 
     fun toggleSleepMode() {

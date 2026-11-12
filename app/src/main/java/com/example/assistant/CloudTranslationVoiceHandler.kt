@@ -30,7 +30,7 @@ object CloudTranslationVoiceHandler {
 
         return try {
             val translationPrompt = """
-                You are ARIA's Cloud Translation Engine.
+                You are ARC's Cloud Translation Engine.
                 The user asks: "$rawQuery"
                 
                 Please perform the requested language translation accurately.

@@ -172,7 +172,7 @@ fun QuickToolsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "ARIA needs 'Draw Over Other Apps' (SYSTEM_ALERT_WINDOW) permission to show the WhatsApp-style floating overlay control while screen sharing in background.",
+                        text = "ARC needs 'Draw Over Other Apps' (SYSTEM_ALERT_WINDOW) permission to show the WhatsApp-style floating overlay control while screen sharing in background.",
                         color = TextSecondary,
                         fontSize = 12.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -286,7 +286,7 @@ fun QuickToolsScreen(
                                 "• Say 'like this reel' for hands-free double tap.\n\n" +
                                 "🔒 Privacy & Transparency:\n" +
                                 "• Runs 100% on-device using Android's standard Gesture Dispatch API.\n" +
-                                "• ARIA NEVER records your passwords, keystrokes, personal chats, or screen contents.\n\n" +
+                                "• ARC NEVER records your passwords, keystrokes, personal chats, or screen contents.\n\n" +
                                 "🍎 iOS Note:\n" +
                                 "• This system-wide gesture automation is EXCLUSIVE to Android. iOS Apple sandbox policy strictly blocks third-party automated gestures.",
                         color = TextSecondary,
@@ -422,7 +422,7 @@ fun QuickToolsScreen(
         item {
             Column {
                 Text(
-                    text = "A.R.I.A. Tools & Utilities",
+                    text = "ARC Tools & Utilities",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
@@ -628,8 +628,8 @@ fun QuickToolsScreen(
                                 }
                             }
                             Text(
-                                text = if (isBackgroundWakeRunning) "Foreground Service ACTIVE: Say 'Hey ARIA' anytime"
-                                else "Listen for 'Hey ARIA' even when app is minimized",
+                                text = if (isBackgroundWakeRunning) "Foreground Service ACTIVE: Say 'Hey ARC' anytime"
+                                else "Listen for 'Hey ARC' even when app is minimized",
                                 color = if (isBackgroundWakeRunning) ElectricEmerald else TextSecondary,
                                 fontSize = 12.sp,
                                 fontWeight = if (isBackgroundWakeRunning) FontWeight.Bold else FontWeight.Normal
@@ -641,10 +641,10 @@ fun QuickToolsScreen(
                             onCheckedChange = { enable ->
                                 if (enable) {
                                     AriaBackgroundWakeService.start(context)
-                                    Toast.makeText(context, "ARIA Background Voice Engine started! Say 'Hey ARIA'", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "ARC Background Voice Engine started! Say 'Hey ARC'", Toast.LENGTH_SHORT).show()
                                 } else {
                                     AriaBackgroundWakeService.stop(context)
-                                    Toast.makeText(context, "ARIA Background Voice Engine stopped", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "ARC Background Voice Engine stopped", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             colors = SwitchDefaults.colors(
@@ -685,7 +685,7 @@ fun QuickToolsScreen(
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Subtle cyan glowing border lights up across your screen whenever ARIA detects wake word, listens or speaks (works over ANY app).",
+                                text = "Subtle cyan glowing border lights up across your screen whenever ARC detects wake word, listens or speaks (works over ANY app).",
                                 color = TextSecondary,
                                 fontSize = 11.sp,
                                 lineHeight = 15.sp
@@ -1412,7 +1412,7 @@ fun QuickToolsScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "ARIA Math Calculator",
+                            text = "ARC Math Calculator",
                             color = TextPrimary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
@@ -1490,7 +1490,7 @@ fun QuickToolsScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "ARIA Quick Notepad",
+                            text = "ARC Quick Notepad",
                             color = TextPrimary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold

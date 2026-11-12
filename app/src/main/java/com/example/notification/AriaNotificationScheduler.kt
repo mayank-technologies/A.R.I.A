@@ -16,7 +16,7 @@ import java.util.Locale
 object AriaNotificationScheduler {
 
     const val CHANNEL_ID = "aria_reminders_channel"
-    private const val CHANNEL_NAME = "A.R.I.A. Scheduled Reminders"
+    private const val CHANNEL_NAME = "ARC Scheduled Reminders"
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -25,7 +25,7 @@ object AriaNotificationScheduler {
                 CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Push notifications for A.R.I.A. voice and manual reminders"
+                description = "Push notifications for ARC voice and manual reminders"
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 250, 500)
                 setShowBadge(true)

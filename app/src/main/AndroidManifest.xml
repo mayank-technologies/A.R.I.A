@@ -91,7 +91,7 @@
         <!-- Device Admin Receiver for ARIA Screen Lock Capability -->
         <receiver
             android:name="com.example.assistant.AriaDeviceAdminReceiver"
-            android:label="ARIA Screen Lock Controller"
+            android:label="ARC Screen Lock Controller"
             android:description="@string/app_name"
             android:permission="android.permission.BIND_DEVICE_ADMIN"
             android:exported="true">
@@ -120,7 +120,7 @@
         <!-- Accessibility Service for Voice-Driven Gestures (Scroll Reels/Shorts, Play/Pause Taps) -->
         <service
             android:name="com.example.assistant.accessibility.AriaAccessibilityGestureService"
-            android:label="A.R.I.A. Voice Gestures"
+            android:label="ARC Voice Gestures"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -129,6 +129,17 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/aria_accessibility_service_config" />
+        </service>
+
+        <!-- Notification Listener Service for WhatsApp Message Ingestion -->
+        <service
+            android:name="com.example.assistant.whatsapp.ArcNotificationListenerService"
+            android:label="ARC WhatsApp Notification Reader"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
     </application>
 

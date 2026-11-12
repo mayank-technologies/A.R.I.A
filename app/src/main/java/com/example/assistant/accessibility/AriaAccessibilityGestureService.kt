@@ -128,6 +128,30 @@ class AriaAccessibilityGestureService : AccessibilityService() {
             }
             service.performDoubleTap(callback)
         }
+
+        /**
+         * Voice Action: Read Screen Content Aloud (Extract text from Accessibility Node Tree)
+         */
+        fun readScreenContent(callback: (String) -> Unit) {
+            val service = instance
+            if (service == null) {
+                callback("Accessibility Service off hai. Pehle Settings me ARC ko permission dijiye.")
+                return
+            }
+            service.extractActiveScreenText(callback)
+        }
+
+        /**
+         * Voice Action: Auto-tap button by label/name
+         */
+        fun autoTapButtonByName(buttonLabel: String, callback: ((GestureResult) -> Unit)? = null) {
+            val service = instance
+            if (service == null) {
+                callback?.invoke(GestureResult.Failure("Accessibility Service off hai. Pehle Settings me ARC enable kijiye."))
+                return
+            }
+            service.findAndClickNodeByText(buttonLabel, callback)
+        }
     }
 
     override fun onServiceConnected() {
@@ -306,5 +330,86 @@ class AriaAccessibilityGestureService : AccessibilityService() {
                 callback?.invoke(GestureResult.Failure("Double tap cancel ho gaya."))
             }
         }, null)
+    }
+
+    /**
+     * Traverses the AccessibilityNodeInfo tree and extracts all visible text content on screen.
+     */
+    private fun extractActiveScreenText(callback: (String) -> Unit) {
+        val rootNode = rootInActiveWindow
+        if (rootNode == null) {
+            callback("Screen content read nahi ho saka (empty window).")
+            return
+        }
+
+        val collectedText = mutableListOf<String>()
+        traverseNodeForText(rootNode, collectedText)
+        rootNode.recycle()
+
+        if (collectedText.isEmpty()) {
+            callback("Screen par koi readable text nahi mila.")
+        } else {
+            val fullText = collectedText.distinct().take(12).joinToString(". ")
+            callback("Screen par ye likha hai: $fullText")
+        }
+    }
+
+    private fun traverseNodeForText(node: android.view.accessibility.AccessibilityNodeInfo?, list: MutableList<String>) {
+        if (node == null) return
+        val text = node.text?.toString()?.trim()
+        val desc = node.contentDescription?.toString()?.trim()
+
+        if (!text.isNullOrBlank()) list.add(text)
+        else if (!desc.isNullOrBlank()) list.add(desc)
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            traverseNodeForText(child, list)
+            child?.recycle()
+        }
+    }
+
+    /**
+     * Finds an interactive node containing the target button text and executes ACTION_CLICK.
+     */
+    private fun findAndClickNodeByText(targetLabel: String, callback: ((GestureResult) -> Unit)?) {
+        val rootNode = rootInActiveWindow
+        if (rootNode == null) {
+            callback?.invoke(GestureResult.Failure("Screen read nahi ho pa raha hai."))
+            return
+        }
+
+        val matchedNodes = rootNode.findAccessibilityNodeInfosByText(targetLabel)
+        if (matchedNodes.isNullOrEmpty()) {
+            rootNode.recycle()
+            callback?.invoke(GestureResult.Failure("'$targetLabel' button screen par nahi mila."))
+            return
+        }
+
+        for (node in matchedNodes) {
+            if (node.isClickable) {
+                val clicked = node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                if (clicked) {
+                    rootNode.recycle()
+                    callback?.invoke(GestureResult.Success("'$targetLabel' button par click kar diya hai! 👆"))
+                    return
+                }
+            }
+            // Check parent if child is text view inside button
+            val parent = node.parent
+            if (parent != null && parent.isClickable) {
+                val clicked = parent.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                if (clicked) {
+                    parent.recycle()
+                    rootNode.recycle()
+                    callback?.invoke(GestureResult.Success("'$targetLabel' button par click kar diya hai! 👆"))
+                    return
+                }
+                parent.recycle()
+            }
+        }
+
+        rootNode.recycle()
+        callback?.invoke(GestureResult.Failure("'$targetLabel' mila lekin click action perform nahi ho saka."))
     }
 }

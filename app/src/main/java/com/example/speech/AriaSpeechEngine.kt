@@ -474,7 +474,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for 'Hey ARIA'...")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for 'Hey ARC'...")
         }
         try {
             _isListening.value = true
@@ -533,7 +533,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for ARIA command...")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for ARC command...")
         }
         try {
             speechRecognizer?.startListening(intent)
@@ -567,6 +567,9 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
             val trimmed = input.trim()
             val lower = trimmed.lowercase(Locale.ROOT)
             val wakePrefixes = listOf(
+                "hey arc", "ok arc", "hi arc", "hello arc", "namaste arc", "listen arc",
+                "arc", "a.r.c.", "hey a.r.c.", "ok a.r.c.", "hi a.r.c.",
+                "hey ark", "ok ark", "hi ark", "hello ark", "ark",
                 "hey aria", "ok aria", "hi aria", "hello aria", "namaste aria", "listen aria",
                 "hey area", "ok area", "hi area", "hello area",
                 "hey a.r.i.a.", "ok a.r.i.a.", "hi a.r.i.a.",
@@ -590,7 +593,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                 }
             }
 
-            for (prefix in listOf("hey aria", "ok aria", "hi aria", "hey area", "ok area")) {
+            for (prefix in listOf("hey arc", "ok arc", "hi arc", "hey ark", "ok ark", "arc", "hey aria", "ok aria", "hi aria", "hey area", "ok area")) {
                 val idx = lower.indexOf(prefix)
                 if (idx != -1) {
                     val remaining = trimmed.substring(idx + prefix.length).trim().trimStart(',', '.', ':', ' ').trim()

@@ -215,7 +215,7 @@ fun AriaSplashScreen() {
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "A.R.I.A. Initializing...",
+                text = "ARC Initializing...",
                 color = TextSecondary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium

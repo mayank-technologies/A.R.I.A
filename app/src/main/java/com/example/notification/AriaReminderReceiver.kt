@@ -82,7 +82,7 @@ class AriaReminderReceiver : BroadcastReceiver() {
 
         val notification = NotificationCompat.Builder(context, AriaNotificationScheduler.CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_popup_reminder)
-            .setContentTitle("A.R.I.A. Reminder ⏰")
+            .setContentTitle("ARC Reminder ⏰")
             .setContentText(title)
             .setStyle(NotificationCompat.BigTextStyle().bigText("$title\nScheduled for $timeString\nTap snooze below to delay by 5, 10, or 15 mins."))
             .setPriority(NotificationCompat.PRIORITY_HIGH)

@@ -220,6 +220,18 @@ object WhatsAppContactResolver {
     }
 
     /**
+     * Finds all matching contacts for multiple-match disambiguation.
+     */
+    fun findAllContactsByName(context: Context, targetName: String): List<ContactMatch> {
+        val allContacts = getAllContacts(context)
+        return when (val res = findBestContactMatches(allContacts, targetName)) {
+            is MatchResult.SingleMatch -> listOf(res.contact)
+            is MatchResult.MultipleMatches -> res.contacts
+            is MatchResult.NoMatch -> emptyList()
+        }
+    }
+
+    /**
      * Performs multi-field, token-based, and fuzzy Levenshtein similarity matching with ~0.6 threshold.
      */
     fun findBestContactMatches(contacts: List<ContactMatch>, targetName: String, threshold: Double = 0.60): MatchResult {
@@ -434,7 +446,7 @@ object WhatsAppContactResolver {
         return digits
     }
 
-    private fun launchWhatsAppUri(context: Context, uriString: String): Boolean {
+    fun launchWhatsAppUri(context: Context, uriString: String): Boolean {
         return try {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uriString)).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

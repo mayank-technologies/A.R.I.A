@@ -106,7 +106,7 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(28.dp))
 
             Text(
-                text = "A.R.I.A. SYSTEM INITIALIZATION",
+                text = "ARC SYSTEM INITIALIZATION",
                 color = CyberCyan,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,

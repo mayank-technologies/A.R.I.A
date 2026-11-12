@@ -55,7 +55,7 @@ class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
     private var isProcessingCommand = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private var activeWakeWord = "hey aria"
+    private var activeWakeWord = "hey arc"
     private val wakeWordAliases = listOf("hey aria", "aria", "computer", "jarvis", "execute", "assistant")
 
     companion object {
@@ -115,10 +115,10 @@ class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "ARIA Background Wake Engine",
+                "ARC Background Wake Engine",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Monitors for wake word 'Hey ARIA' and runs voice commands in the background"
+                description = "Monitors for wake word 'Hey ARC' and runs voice commands in the background"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -144,8 +144,8 @@ class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
         )
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("A.R.I.A. Background Voice Engine Active")
-            .setContentText("Listening for 'Hey ARIA' • Edge Glow Visual Active")
+            .setContentTitle("ARC Background Voice Engine Active")
+            .setContentText("Listening for 'Hey ARC' • Edge Glow Visual Active")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
@@ -260,7 +260,7 @@ class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
             if (command.isNotBlank()) {
                 executeVoiceCommand(command)
             } else {
-                // User just said "Hey ARIA", respond with polite JARVIS greeting
+                // User just said "Hey ARC", respond with polite JARVIS greeting
                 speakResponse("At your service, Boss. How may I assist you?")
             }
         } else {

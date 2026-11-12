@@ -31,10 +31,10 @@ class RoutineManager(
         fun isRoutineCommand(queryLower: String): Boolean {
             return queryLower.contains("good morning") ||
                     queryLower.contains("subah ho gayi") ||
-                    queryLower.contains("wake up aria") ||
+                    queryLower.contains("wake up arc") || queryLower.contains("wake up aria") ||
                     queryLower.contains("good night") ||
                     queryLower.contains("shubh ratri") ||
-                    queryLower.contains("so jao aria") ||
+                    queryLower.contains("so jao arc") || queryLower.contains("so jao aria") ||
                     queryLower.contains("sleep mode") ||
                     queryLower.contains("standby mode") ||
                     queryLower.contains("office jaana hai")

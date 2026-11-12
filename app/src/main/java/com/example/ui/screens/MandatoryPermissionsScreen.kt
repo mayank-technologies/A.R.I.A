@@ -96,13 +96,13 @@ fun MandatoryPermissionsScreen(
 ) {
     val context = LocalContext.current
 
-    // Prepare list of required permissions for A.R.I.A. app
+    // Prepare list of required permissions for ARC app
     val permissionList = remember {
         val list = mutableListOf(
             PermissionItemInfo(
                 id = "mic",
                 title = "Microphone / Audio",
-                explanation = "Voice commands aur ARIA voice recognition ke liye zaroori hai",
+                explanation = "Voice commands aur ARC voice recognition ke liye zaroori hai",
                 icon = Icons.Default.Mic,
                 manifestPermissions = listOf(Manifest.permission.RECORD_AUDIO)
             ),
@@ -291,7 +291,7 @@ fun MandatoryPermissionsScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "A.R.I.A. PERMISSIONS SETUP",
+                    text = "ARC PERMISSIONS SETUP",
                     color = CyberCyan,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
@@ -390,7 +390,7 @@ fun MandatoryPermissionsScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Permissions Required for ARIA Features",
+                                text = "Permissions Required for ARC Features",
                                 color = WarningAmber,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
@@ -572,7 +572,7 @@ fun MandatoryPermissionsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                // "PROCEED TO ARIA HOME" Mandatory Completion Button
+                // "PROCEED TO ARC HOME" Mandatory Completion Button
                 Button(
                     onClick = {
                         // Refresh to make sure current state is up to date
@@ -598,7 +598,7 @@ fun MandatoryPermissionsScreen(
                         .testTag("continue_to_app_button")
                 ) {
                     Text(
-                        text = if (isAllGranted) "CONTINUE TO ARIA HOME 🚀" else "GRANT & PROCEED",
+                        text = if (isAllGranted) "CONTINUE TO ARC HOME 🚀" else "GRANT & PROCEED",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp

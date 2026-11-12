@@ -91,7 +91,10 @@ import com.example.ui.AriaViewModel
 import com.example.ui.AssistantStatus
 import com.example.ui.MemoryFactItem
 import com.example.ui.components.ArcReactorVisualizer
+import com.example.ui.components.AvatarForm
+import com.example.ui.components.AvatarFormSelector
 import com.example.ui.components.ListeningPulseIndicator
+import com.example.ui.components.ParticleAvatar3D
 import com.example.ui.theme.CarbonBlack
 import com.example.ui.theme.ReactorGold
 import com.example.ui.theme.CobaltTech
@@ -221,6 +224,9 @@ fun VoiceHudScreen(
     val isSpeaking by viewModel.isSpeaking.collectAsState()
     val isSynthesizing by viewModel.isSynthesizing.collectAsState()
     val isWakeWordModeEnabled by viewModel.isWakeWordModeEnabled.collectAsState()
+    val currentAvatarForm by viewModel.avatarForm.collectAsState()
+    val isGeminiLiveMode by viewModel.isGeminiLiveMode.collectAsState()
+    val geminiLiveState by viewModel.geminiLiveManager.sessionState.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(HudTab.ALL) }
@@ -305,7 +311,7 @@ fun VoiceHudScreen(
 
             // Center: Prominent Modern A.R.I.A. Title
             Text(
-                text = "A.R.I.A.",
+                text = "ARC",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.ExtraBold,
                 fontFamily = FontFamily.Monospace,
@@ -419,10 +425,10 @@ fun VoiceHudScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Interactive Central Orb Container (Compact size 120dp for minimal vertical footprint)
+                // Interactive Central 3D Particle Avatar Container (CORE / FEMALE / MALE)
                 Box(
                     modifier = Modifier
-                        .size(120.dp)
+                        .size(135.dp)
                         .clickable {
                             if (assistantStatus == AssistantStatus.SLEEP) {
                                 viewModel.wakeUp()
@@ -432,17 +438,18 @@ fun VoiceHudScreen(
                                 viewModel.startListening()
                             }
                         }
-                        .testTag("central_activate_aria_orb"),
+                        .testTag("central_activate_arc_orb"),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Animated Arc Reactor HUD Canvas (compact & optimized)
-                    ArcReactorVisualizer(
+                    // Particle-based 3D Dust-Cloud Avatar (CORE, FEMALE, MALE)
+                    ParticleAvatar3D(
+                        currentForm = currentAvatarForm,
                         status = assistantStatus,
                         disableAnimations = isBatterySaverActive,
-                        modifier = Modifier.size(120.dp)
+                        modifier = Modifier.size(135.dp)
                     )
 
-                    // Overlay "ACTIVATE ARIA" CTA inside the central core when IDLE or SLEEP
+                    // Overlay "ACTIVATE ARC" CTA inside the central core when IDLE or SLEEP
                     if (assistantStatus == AssistantStatus.IDLE || assistantStatus == AssistantStatus.SLEEP) {
                         Box(
                             modifier = Modifier
@@ -453,7 +460,7 @@ fun VoiceHudScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "ACTIVATE ARIA",
+                                text = "ACTIVATE ARC",
                                 color = ElectricCyan,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
@@ -498,47 +505,109 @@ fun VoiceHudScreen(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Hands-Free Wake-Word Toggle Badge (Compact pill)
-                Box(
+                // 3D Particle Avatar Form Selector ("CORE", "FEMALE", "MALE")
+                AvatarFormSelector(
+                    selectedForm = currentAvatarForm,
+                    onSelectForm = { newForm ->
+                        viewModel.setAvatarForm(newForm)
+                    },
                     modifier = Modifier
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(
-                            if (isWakeWordModeEnabled) ElectricEmerald.copy(alpha = 0.15f)
-                            else Color(0xFF0F172A).copy(alpha = 0.7f)
-                        )
-                        .border(
-                            1.dp,
-                            if (isWakeWordModeEnabled) ElectricEmerald.copy(alpha = 0.6f) else GlassBorderCyan,
-                            RoundedCornerShape(18.dp)
-                        )
-                        .clickable { viewModel.toggleWakeWordMode() }
-                        .padding(horizontal = 10.dp, vertical = 3.dp)
-                        .testTag("wake_word_toggle_badge")
+                        .fillMaxWidth(0.72f)
+                        .height(34.dp)
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Row with Wake-Word Badge & Gemini Live Voice-to-Voice Badge
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    // Hands-Free Wake-Word Toggle Badge (Compact pill)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(
+                                if (isWakeWordModeEnabled) ElectricEmerald.copy(alpha = 0.15f)
+                                else Color(0xFF0F172A).copy(alpha = 0.7f)
+                            )
+                            .border(
+                                1.dp,
+                                if (isWakeWordModeEnabled) ElectricEmerald.copy(alpha = 0.6f) else GlassBorderCyan,
+                                RoundedCornerShape(18.dp)
+                            )
+                            .clickable { viewModel.toggleWakeWordMode() }
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
+                            .testTag("wake_word_toggle_badge")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.RecordVoiceOver,
-                            contentDescription = "Wake Word Status",
-                            tint = if (isWakeWordModeEnabled) ElectricEmerald else TextSecondary,
-                            modifier = Modifier.size(11.dp)
-                        )
-                        Text(
-                            text = if (isWakeWordModeEnabled) "WAKE-WORD: 'HEY ARIA' 🎙️" else "WAKE-WORD: 'HEY ARIA' (TAP TO ENABLE)",
-                            color = if (isWakeWordModeEnabled) ElectricEmerald else TextSecondary,
-                            fontSize = 8.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 0.6.sp
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.RecordVoiceOver,
+                                contentDescription = "Wake Word Status",
+                                tint = if (isWakeWordModeEnabled) ElectricEmerald else TextSecondary,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = if (isWakeWordModeEnabled) "WAKE: 'HEY ARC' 🎙️" else "WAKE: OFF",
+                                color = if (isWakeWordModeEnabled) ElectricEmerald else TextSecondary,
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 0.6.sp
+                            )
+                        }
+                    }
+
+                    // Gemini Live Voice-to-Voice Mode Toggle
+                    val isLiveConnected = geminiLiveState == com.example.geminilive.GeminiLiveSessionState.CONNECTED ||
+                            geminiLiveState == com.example.geminilive.GeminiLiveSessionState.LISTENING ||
+                            geminiLiveState == com.example.geminilive.GeminiLiveSessionState.SPEAKING
+                    val liveColor = if (isLiveConnected) CyberCyan else if (isGeminiLiveMode) WarningAmber else TextSecondary
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(
+                                if (isLiveConnected) CyberCyan.copy(alpha = 0.18f)
+                                else Color(0xFF0F172A).copy(alpha = 0.7f)
+                            )
+                            .border(
+                                1.dp,
+                                if (isLiveConnected) CyberCyan.copy(alpha = 0.8f) else GlassBorderCyan,
+                                RoundedCornerShape(18.dp)
+                            )
+                            .clickable { viewModel.toggleGeminiLiveMode() }
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
+                            .testTag("gemini_live_mode_badge")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = if (isLiveConnected) "⚡" else "🌐",
+                                fontSize = 9.sp
+                            )
+                            Text(
+                                text = if (isLiveConnected) "GEMINI LIVE: ${geminiLiveState.name}"
+                                else if (isGeminiLiveMode) "LIVE: CONNECTING..."
+                                else "GEMINI LIVE VOICE",
+                                color = liveColor,
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 0.6.sp
+                            )
+                        }
                     }
                 }
 
                 // Active Listening Audio Wave Ripple Indicator
                 ListeningPulseIndicator(
-                    isListening = assistantStatus == AssistantStatus.LISTENING,
+                    isListening = assistantStatus == AssistantStatus.LISTENING || geminiLiveState == com.example.geminilive.GeminiLiveSessionState.LISTENING,
                     disableAnimations = isBatterySaverActive,
                     modifier = Modifier.padding(top = 1.dp)
                 )
@@ -718,7 +787,7 @@ fun VoiceHudScreen(
                                         Row(verticalAlignment = Alignment.Top) {
                                             Icon(
                                                 imageVector = Icons.Default.RecordVoiceOver,
-                                                contentDescription = "ARIA",
+                                                contentDescription = "ARC",
                                                 tint = if (isSpeaking) ElectricEmerald else ElectricCyan,
                                                 modifier = Modifier
                                                     .size(15.dp)
@@ -847,13 +916,13 @@ fun VoiceHudScreen(
                                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                                              Icon(
                                                                  imageVector = Icons.Default.RecordVoiceOver,
-                                                                 contentDescription = "ARIA",
+                                                                 contentDescription = "ARC",
                                                                  tint = HologramBlue,
                                                                  modifier = Modifier.size(10.dp)
                                                              )
                                                              Spacer(modifier = Modifier.width(4.dp))
                                                              Text(
-                                                                 text = "ARIA",
+                                                                 text = "ARC",
                                                                  fontSize = 8.sp,
                                                                  fontWeight = FontWeight.Bold,
                                                                  fontFamily = FontFamily.Monospace,
@@ -1011,7 +1080,7 @@ fun VoiceHudScreen(
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "A.R.I.A. MEMORY & FACTS",
+                                            text = "ARC MEMORY & FACTS",
                                             fontSize = 10.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace,
@@ -1215,8 +1284,8 @@ fun VoiceHudScreen(
         ) {
             item {
                 SuggestionChip(
-                    onClick = { viewModel.submitTextCommand("Hey ARIA") },
-                    label = { Text("🎙️ Hey ARIA", fontSize = 8.5.sp, color = ElectricEmerald, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace) },
+                    onClick = { viewModel.submitTextCommand("Hey ARC") },
+                    label = { Text("🎙️ Hey ARC", fontSize = 8.5.sp, color = ElectricEmerald, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace) },
                     colors = SuggestionChipDefaults.suggestionChipColors(containerColor = ElectricEmerald.copy(alpha = 0.12f)),
                     border = BorderStroke(1.dp, ElectricEmerald.copy(alpha = 0.45f))
                 )
@@ -1267,7 +1336,7 @@ fun VoiceHudScreen(
             OutlinedTextField(
                 value = inputText,
                 onValueChange = { inputText = it },
-                placeholder = { Text("Type command for ARIA...", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace) },
+                placeholder = { Text("Type command for ARC...", color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace) },
                 modifier = Modifier
                     .weight(1f)
                     .testTag("text_command_input"),
@@ -1343,7 +1412,7 @@ fun VoiceHudScreen(
             onDismissRequest = { showAddMemoryDialog = false },
             title = {
                 Text(
-                    text = "ADD FACT TO ARIA MEMORY",
+                    text = "ADD FACT TO ARC MEMORY",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
@@ -1353,7 +1422,7 @@ fun VoiceHudScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Enter a fact or preference for ARIA to remember:",
+                        text = "Enter a fact or preference for ARC to remember:",
                         fontSize = 11.sp,
                         color = TextSecondary
                     )
