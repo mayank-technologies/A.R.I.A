@@ -633,9 +633,15 @@ class AriaCommandProcessor(
         return clean
     }
 
-    suspend fun tryGetWeather(city: String): String {
+    data class WeatherSnapshot(
+        val tempDisplay: String,
+        val condition: String,
+        val city: String,
+        val summaryLine: String
+    )
+
+    suspend fun fetchWeatherSnapshot(city: String = "Delhi"): WeatherSnapshot {
         return try {
-            // First search city coordinates using Open-Meteo public geocoding API
             val geoRes = com.example.api.WeatherClient.geoService.searchCity(city)
             val location = geoRes.results?.firstOrNull()
 
@@ -645,41 +651,59 @@ class AriaCommandProcessor(
                     lon = location.longitude
                 )
                 val cw = forecast.current_weather
-                val temp = cw?.temperature?.toInt() ?: 25
+                val temp = cw?.temperature?.toInt() ?: 26
                 val condition = com.example.api.mapWeatherCode(cw?.weathercode)
                 val wind = cw?.windspeed?.toInt() ?: 10
                 val cityName = location.name ?: city
                 val country = location.country ?: ""
                 val locationLabel = if (country.isNotBlank()) "$cityName, $country" else cityName
 
-                "$locationLabel: $condition, $temp°C, Wind $wind km/h"
+                WeatherSnapshot(
+                    tempDisplay = "${temp}°C",
+                    condition = condition,
+                    city = cityName,
+                    summaryLine = "$locationLabel: $condition, $temp°C, Wind $wind km/h"
+                )
             } else {
-                "$city: Clear sky, 27°C"
+                WeatherSnapshot(
+                    tempDisplay = "26°C",
+                    condition = "Clear sky",
+                    city = city,
+                    summaryLine = "$city: Clear sky, 26°C"
+                )
             }
         } catch (e: Exception) {
-            "$city: Weather 26°C, Clear sky"
+            WeatherSnapshot(
+                tempDisplay = "26°C",
+                condition = "Clear sky",
+                city = city,
+                summaryLine = "$city: Weather 26°C, Clear sky"
+            )
         }
     }
 
+    suspend fun tryGetWeather(city: String): String {
+        return fetchWeatherSnapshot(city).summaryLine
+    }
+
     /**
-     * Aggregates upcoming reminders and local weather data into a 'Good morning' briefing summary.
+     * Cohesive Auto-Greeting briefing:
+     * Time-aware greeting ("Hello [Name]! Good morning/afternoon/evening/night"),
+     * today's weather, and today's tasks/reminders.
      */
     suspend fun generateBriefingSummary(userName: String): String = withContext(Dispatchers.IO) {
         val displayName = userName.ifBlank { "Boss" }
 
-        // Time-aware greeting
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         val timeGreeting = when (hour) {
             in 4..11 -> "Good morning"
             in 12..16 -> "Good afternoon"
-            in 17..21 -> "Good evening"
-            else -> "Hello"
+            in 17..20 -> "Good evening"
+            else -> "Good night"
         }
 
-        // Local weather information
-        val weatherData = tryGetWeather("Delhi")
+        val weather = fetchWeatherSnapshot("Delhi")
 
-        // Fetch pending reminders
         val allRemindersList = try {
             ariaDao.getAllReminders().first()
         } catch (e: Exception) {
@@ -688,26 +712,22 @@ class AriaCommandProcessor(
         val pendingReminders = allRemindersList.filter { !it.isCompleted }
 
         val briefingText = buildString {
-            append("$timeGreeting $displayName! ☀️\n")
-            append("Here is your launch briefing summary:\n\n")
-            append("🌤️ Weather: $weatherData\n\n")
+            append("Hello $displayName! $timeGreeting.\n")
+            append("${weather.city} ka weather aaj ${weather.tempDisplay}, ${weather.condition.lowercase(Locale.ROOT)} hai.\n")
 
             if (pendingReminders.isNotEmpty()) {
-                append("📌 Upcoming Reminders (${pendingReminders.size}):\n")
-                pendingReminders.take(4).forEach { item ->
-                    append("• ${item.title} at ${item.timeString}\n")
+                append("Aaj aapke ${pendingReminders.size} tasks pending hain: ")
+                append(pendingReminders.take(3).joinToString(", ") { "${it.title} at ${it.timeString}" })
+                if (pendingReminders.size > 3) {
+                    append(", aur ${pendingReminders.size - 3} aur tasks")
                 }
-                if (pendingReminders.size > 4) {
-                    append("• ...and ${pendingReminders.size - 4} more\n")
-                }
+                append(".")
             } else {
-                append("📌 Reminders: You have no pending tasks scheduled. All clear!\n")
+                append("Aaj aapka koi task nahi hai.")
             }
-
-            append("\nHave a productive and fantastic day ahead!")
         }
 
-        saveHistory("Launch Briefing", briefingText, "BRIEFING")
+        saveHistory("ARC Auto Briefing", briefingText, "BRIEFING")
         briefingText
     }
 }

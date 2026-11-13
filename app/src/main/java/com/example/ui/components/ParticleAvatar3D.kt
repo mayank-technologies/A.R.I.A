@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -13,25 +14,26 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -41,12 +43,10 @@ import com.example.ui.AssistantStatus
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricCyan
-import com.example.ui.theme.ElectricEmerald
 import com.example.ui.theme.GlassBorderCyan
 import com.example.ui.theme.HologramBlue
 import com.example.ui.theme.ReactorGold
 import com.example.ui.theme.SurfaceDark
-import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.WarningAmber
 import kotlin.math.PI
@@ -54,19 +54,18 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sin
-import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
  * 3 Supported 3D Particle Avatar Formats:
- * 1. CORE: Glowing sphere / ARC reactor orb with dense center & decaying aura.
- * 2. FEMALE: Elegant human bust with stylized flowing hair silhouette & bright facial core.
- * 3. MALE: Sharp athletic human bust with angular jawline, short silhouette & bright facial core.
+ * 1. CORE: Glowing sphere / ARC orb with dense bright nucleus & orbital shell.
+ * 2. FEMALE: Refined human bust with flowing hair silhouette, slender neck & bright facial core.
+ * 3. MALE: Athletic human bust with angular jawline, short crown silhouette, broad shoulders & bright facial core.
  */
-enum class AvatarForm(val label: String, val icon: String) {
-    CORE("CORE", "⚛️"),
-    FEMALE("FEMALE", "👩"),
-    MALE("MALE", "👨");
+enum class AvatarForm(val label: String) {
+    CORE("CORE"),
+    FEMALE("FEMALE"),
+    MALE("MALE");
 
     companion object {
         fun fromString(name: String?): AvatarForm {
@@ -88,113 +87,216 @@ data class ParticlePoint(
 )
 
 /**
+ * Ambient floating sparkle / "+" marker orbiting softly around the avatar (SARA-inspired polish).
+ */
+private data class AmbientSparkle(
+    val angleRad: Float,
+    val distanceFactor: Float,
+    val phaseOffset: Float,
+    val speedMult: Float,
+    val isCrosshair: Boolean,
+    val sizeDp: Float
+)
+
+/**
  * Procedural Point Cloud Generator.
- * Uses 500 high-efficiency particles — mathematically tuned for smooth 60fps rendering
- * even on budget 4GB RAM devices and emulator previews without GPU overheating.
+ * Uses 820 density-scaled particles for vivid 3D silhouettes across CORE, FEMALE, and MALE forms
+ * while staying smooth at 60fps in native Compose Canvas.
  */
 object AvatarShapeGenerator {
-    const val PARTICLE_COUNT = 520
+    const val PARTICLE_COUNT = 820
 
     fun generatePoints(form: AvatarForm): List<ParticlePoint> {
-        val rand = Random(42) // Stable deterministic seed for consistent, beautiful topology
+        val rand = Random(42)
         val list = ArrayList<ParticlePoint>(PARTICLE_COUNT)
 
         when (form) {
             AvatarForm.CORE -> {
-                // Dense glowing spherical shell + nucleus with radial falloff
                 for (i in 0 until PARTICLE_COUNT) {
-                    val theta = rand.nextFloat() * 2f * PI.toFloat()
-                    val phi = (rand.nextFloat() - 0.5f) * PI.toFloat()
-                    // 60% in outer shell, 40% in bright inner core
-                    val radius = if (rand.nextFloat() < 0.4f) {
-                        rand.nextFloat() * 0.45f // Dense central core
-                    } else {
-                        0.55f + rand.nextFloat() * 0.35f // Outer glowing shell
+                    val roll = rand.nextFloat()
+                    when {
+                        // Dense luminous core nucleus (35%)
+                        roll < 0.35f -> {
+                            val theta = rand.nextFloat() * 2f * PI.toFloat()
+                            val phi = (rand.nextFloat() - 0.5f) * PI.toFloat()
+                            val radius = rand.nextFloat().pow(1.4f) * 0.38f
+                            val x = radius * cos(phi) * cos(theta)
+                            val y = radius * sin(phi)
+                            val z = radius * cos(phi) * sin(theta)
+                            list.add(ParticlePoint(x, y, z, brightnessMultiplier = 1.55f, isFaceFeature = radius < 0.22f))
+                        }
+                        // Mid spherical dust cloud (40%)
+                        roll < 0.75f -> {
+                            val theta = rand.nextFloat() * 2f * PI.toFloat()
+                            val phi = (rand.nextFloat() - 0.5f) * PI.toFloat()
+                            val radius = 0.42f + rand.nextFloat() * 0.34f
+                            val x = radius * cos(phi) * cos(theta)
+                            val y = radius * sin(phi)
+                            val z = radius * cos(phi) * sin(theta)
+                            list.add(ParticlePoint(x, y, z, brightnessMultiplier = 1.05f))
+                        }
+                        // Outer glowing orbital shell & subtle tilted ring (25%)
+                        else -> {
+                            val theta = rand.nextFloat() * 2f * PI.toFloat()
+                            val isRing = rand.nextFloat() < 0.45f
+                            val radius = if (isRing) 0.78f + rand.nextFloat() * 0.14f else 0.72f + rand.nextFloat() * 0.16f
+                            val phi = if (isRing) (rand.nextFloat() - 0.5f) * 0.14f else (rand.nextFloat() - 0.5f) * PI.toFloat()
+                            val x = radius * cos(phi) * cos(theta)
+                            val rawY = radius * sin(phi)
+                            val z = radius * cos(phi) * sin(theta)
+                            val y = if (isRing) rawY * 0.85f + z * 0.28f else rawY
+                            list.add(ParticlePoint(x, y, z, brightnessMultiplier = 0.88f))
+                        }
                     }
-                    val x = radius * cos(phi) * cos(theta)
-                    val y = radius * sin(phi)
-                    val z = radius * cos(phi) * sin(theta)
-                    val brightness = if (radius < 0.45f) 1.25f else 0.85f
-                    list.add(ParticlePoint(x, y, z, brightness))
                 }
             }
 
             AvatarForm.FEMALE -> {
-                // Torso, shoulders, neck, head with hair contours, and luminous facial center
                 for (i in 0 until PARTICLE_COUNT) {
-                    val randType = rand.nextFloat()
+                    val roll = rand.nextFloat()
                     when {
-                        // 1. Bright Facial Core (Cheeks, eyes, mouth center)
-                        randType < 0.22f -> {
-                            val fx = (rand.nextFloat() - 0.5f) * 0.32f
-                            val fy = -0.25f + (rand.nextFloat() - 0.5f) * 0.32f
-                            val fz = 0.25f + rand.nextFloat() * 0.2f
-                            list.add(ParticlePoint(fx, fy, fz, brightnessMultiplier = 1.6f, isFaceFeature = true))
+                        // 1. Bright eyes & facial center highlights (16%)
+                        roll < 0.16f -> {
+                            val featureRoll = rand.nextFloat()
+                            val (fx, fy, fz) = when {
+                                // Left & right luminous eyes
+                                featureRoll < 0.42f -> {
+                                    val side = if (rand.nextBoolean()) 1f else -1f
+                                    Triple(
+                                        side * (0.09f + (rand.nextFloat() - 0.5f) * 0.04f),
+                                        -0.41f + (rand.nextFloat() - 0.5f) * 0.03f,
+                                        0.25f + rand.nextFloat() * 0.08f
+                                    )
+                                }
+                                // Soft glowing cheekbones / nose / lips silhouette
+                                else -> {
+                                    Triple(
+                                        (rand.nextFloat() - 0.5f) * 0.22f,
+                                        -0.37f + (rand.nextFloat() - 0.5f) * 0.22f,
+                                        0.22f + rand.nextFloat() * 0.12f
+                                    )
+                                }
+                            }
+                            list.add(ParticlePoint(fx, fy, fz, brightnessMultiplier = 1.75f, isFaceFeature = true))
                         }
-                        // 2. Head contour (Smoother, feminine proportions)
-                        randType < 0.48f -> {
+
+                        // 2. Refined oval head & jawline contour (26%)
+                        roll < 0.42f -> {
                             val theta = rand.nextFloat() * 2f * PI.toFloat()
                             val phi = (rand.nextFloat() - 0.5f) * PI.toFloat()
-                            val rx = 0.32f * cos(phi) * cos(theta)
-                            val ry = -0.26f + 0.38f * sin(phi)
-                            val rz = 0.32f * cos(phi) * sin(theta)
-                            list.add(ParticlePoint(rx, ry, rz, brightnessMultiplier = 1.0f))
+                            val jawTaper = if (phi > 0f) 1f - (phi / (PI.toFloat() / 2f)) * 0.26f else 1f
+                            val rx = 0.27f * jawTaper * cos(phi) * cos(theta)
+                            val ry = -0.38f + 0.29f * sin(phi)
+                            val rz = 0.27f * jawTaper * cos(phi) * sin(theta)
+                            list.add(ParticlePoint(rx, ry, rz, brightnessMultiplier = 1.1f))
                         }
-                        // 3. Flowing Hair Silhouette (Wider sides & cascading shoulders)
-                        randType < 0.72f -> {
-                            val side = if (rand.nextBoolean()) 1f else -1f
-                            val hx = side * (0.34f + rand.nextFloat() * 0.28f)
-                            val hy = -0.45f + rand.nextFloat() * 0.75f // Cascading down
-                            val hz = -0.1f + rand.nextFloat() * 0.4f
-                            list.add(ParticlePoint(hx, hy, hz, brightnessMultiplier = 0.8f))
+
+                        // 3. Flowing Hair Crown & Shoulder Cascade (30%)
+                        roll < 0.72f -> {
+                            val isCrown = rand.nextFloat() < 0.30f
+                            if (isCrown) {
+                                val theta = rand.nextFloat() * PI.toFloat() // Upper arc
+                                val rx = 0.33f * cos(theta) + (rand.nextFloat() - 0.5f) * 0.07f
+                                val ry = -0.44f - 0.30f * sin(theta) + (rand.nextFloat() - 0.5f) * 0.05f
+                                val rz = (rand.nextFloat() - 0.5f) * 0.35f - 0.05f
+                                list.add(ParticlePoint(rx, ry, rz, brightnessMultiplier = 0.92f))
+                            } else {
+                                val side = if (rand.nextBoolean()) 1f else -1f
+                                val t = rand.nextFloat() // 0 at temple -> 1 past shoulders
+                                val wave = sin(t * 5f) * 0.04f
+                                val hx = side * (0.28f + t * 0.14f + wave + (rand.nextFloat() - 0.5f) * 0.10f)
+                                val hy = -0.56f + t * 0.88f
+                                val hz = -0.18f + rand.nextFloat() * 0.36f
+                                list.add(ParticlePoint(hx, hy, hz, brightnessMultiplier = 0.85f))
+                            }
                         }
-                        // 4. Slender Shoulders, Neck & Torso
+
+                        // 4. Slender Neck, Collarbone & Contoured Bust (28%)
                         else -> {
-                            val tx = (rand.nextFloat() - 0.5f) * 0.85f
-                            val progress = (abs(tx) / 0.45f).coerceIn(0f, 1f)
-                            val ty = 0.18f + progress * 0.25f + rand.nextFloat() * 0.38f
-                            val tz = (rand.nextFloat() - 0.5f) * 0.4f
-                            list.add(ParticlePoint(tx, ty, tz, brightnessMultiplier = 0.9f))
+                            val isNeck = rand.nextFloat() < 0.26f
+                            if (isNeck) {
+                                val theta = rand.nextFloat() * 2f * PI.toFloat()
+                                val nx = 0.10f * cos(theta)
+                                val ny = -0.14f + rand.nextFloat() * 0.22f
+                                val nz = 0.10f * sin(theta)
+                                list.add(ParticlePoint(nx, ny, nz, brightnessMultiplier = 1.0f))
+                            } else {
+                                val tx = (rand.nextFloat() - 0.5f) * 0.96f
+                                val shoulderDrop = (abs(tx) / 0.50f).coerceIn(0f, 1f).pow(1.4f) * 0.18f
+                                val ty = 0.08f + shoulderDrop + rand.nextFloat() * 0.54f
+                                val torsoTaper = 1f - ((ty - 0.08f) / 0.72f).coerceIn(0f, 0.35f)
+                                val tz = (rand.nextFloat() - 0.5f) * 0.32f
+                                list.add(ParticlePoint(tx * torsoTaper, ty, tz, brightnessMultiplier = 0.95f))
+                            }
                         }
                     }
                 }
             }
 
             AvatarForm.MALE -> {
-                // Athletic broader shoulders, defined jaw, shorter silhouette & luminous face
                 for (i in 0 until PARTICLE_COUNT) {
-                    val randType = rand.nextFloat()
+                    val roll = rand.nextFloat()
                     when {
-                        // 1. High-illumination Face & Jawline Center
-                        randType < 0.22f -> {
-                            val fx = (rand.nextFloat() - 0.5f) * 0.36f
-                            val fy = -0.24f + (rand.nextFloat() - 0.5f) * 0.34f
-                            val fz = 0.25f + rand.nextFloat() * 0.22f
-                            list.add(ParticlePoint(fx, fy, fz, brightnessMultiplier = 1.6f, isFaceFeature = true))
+                        // 1. Bright eyes, brow & jawline core (16%)
+                        roll < 0.16f -> {
+                            val featureRoll = rand.nextFloat()
+                            val (fx, fy, fz) = when {
+                                featureRoll < 0.42f -> {
+                                    val side = if (rand.nextBoolean()) 1f else -1f
+                                    Triple(
+                                        side * (0.10f + (rand.nextFloat() - 0.5f) * 0.04f),
+                                        -0.41f + (rand.nextFloat() - 0.5f) * 0.03f,
+                                        0.27f + rand.nextFloat() * 0.08f
+                                    )
+                                }
+                                else -> {
+                                    Triple(
+                                        (rand.nextFloat() - 0.5f) * 0.26f,
+                                        -0.36f + (rand.nextFloat() - 0.5f) * 0.24f,
+                                        0.24f + rand.nextFloat() * 0.12f
+                                    )
+                                }
+                            }
+                            list.add(ParticlePoint(fx, fy, fz, brightnessMultiplier = 1.75f, isFaceFeature = true))
                         }
-                        // 2. Structured Angular Head Silhouette (Broader temples & chin)
-                        randType < 0.48f -> {
+
+                        // 2. Sculpted angular head & defined square jaw (30%)
+                        roll < 0.46f -> {
                             val theta = rand.nextFloat() * 2f * PI.toFloat()
                             val phi = (rand.nextFloat() - 0.5f) * PI.toFloat()
-                            val rx = 0.35f * cos(phi) * cos(theta)
-                            val ry = -0.25f + 0.37f * sin(phi)
-                            val rz = 0.35f * cos(phi) * sin(theta)
-                            list.add(ParticlePoint(rx, ry, rz, brightnessMultiplier = 1.05f))
+                            val jawSquare = if (phi > 0.2f) 0.92f else 1f
+                            val rx = 0.30f * jawSquare * cos(phi) * cos(theta)
+                            val ry = -0.37f + 0.29f * sin(phi)
+                            val rz = 0.30f * jawSquare * cos(phi) * sin(theta)
+                            list.add(ParticlePoint(rx, ry, rz, brightnessMultiplier = 1.12f))
                         }
-                        // 3. Short Hair / Top Crown Silhouette
-                        randType < 0.65f -> {
-                            val cx = (rand.nextFloat() - 0.5f) * 0.42f
-                            val cy = -0.48f + rand.nextFloat() * 0.18f // Tight hair top
-                            val cz = (rand.nextFloat() - 0.5f) * 0.45f
-                            list.add(ParticlePoint(cx, cy, cz, brightnessMultiplier = 0.85f))
+
+                        // 3. Tight Short Crown Hair Silhouette (16%)
+                        roll < 0.62f -> {
+                            val theta = rand.nextFloat() * PI.toFloat()
+                            val cx = 0.31f * cos(theta) + (rand.nextFloat() - 0.5f) * 0.08f
+                            val cy = -0.49f - 0.21f * sin(theta) + (rand.nextFloat() - 0.5f) * 0.05f
+                            val cz = (rand.nextFloat() - 0.5f) * 0.38f
+                            list.add(ParticlePoint(cx, cy, cz, brightnessMultiplier = 0.92f))
                         }
-                        // 4. Broad Athletic Shoulders & Upper Chest
+
+                        // 4. Strong Neck & Broad Athletic Shoulders / Upper Chest (38%)
                         else -> {
-                            val tx = (rand.nextFloat() - 0.5f) * 1.15f // Broader shoulder span
-                            val progress = (abs(tx) / 0.6f).coerceIn(0f, 1f)
-                            val ty = 0.16f + progress * 0.2f + rand.nextFloat() * 0.42f
-                            val tz = (rand.nextFloat() - 0.5f) * 0.45f
-                            list.add(ParticlePoint(tx, ty, tz, brightnessMultiplier = 0.95f))
+                            val isNeck = rand.nextFloat() < 0.22f
+                            if (isNeck) {
+                                val theta = rand.nextFloat() * 2f * PI.toFloat()
+                                val nx = 0.145f * cos(theta)
+                                val ny = -0.12f + rand.nextFloat() * 0.20f
+                                val nz = 0.145f * sin(theta)
+                                list.add(ParticlePoint(nx, ny, nz, brightnessMultiplier = 1.05f))
+                            } else {
+                                val tx = (rand.nextFloat() - 0.5f) * 1.38f
+                                val shoulderDrop = (abs(tx) / 0.70f).coerceIn(0f, 1f).pow(1.6f) * 0.14f
+                                val ty = 0.06f + shoulderDrop + rand.nextFloat() * 0.58f
+                                val chestTaper = 1f - ((ty - 0.06f) / 0.75f).coerceIn(0f, 0.28f)
+                                val tz = (rand.nextFloat() - 0.5f) * 0.38f
+                                list.add(ParticlePoint(tx * chestTaper, ty, tz, brightnessMultiplier = 1.0f))
+                            }
                         }
                     }
                 }
@@ -205,12 +307,8 @@ object AvatarShapeGenerator {
 }
 
 /**
- * Interactive Particle 3D Avatar System with smooth morphing transitions and floating physics.
- *
- * Performance Architecture (Optimized for 4GB RAM & Laptops):
- * - Renders directly via Jetpack Compose native Canvas drawScope (zero heavy WebViews / Three.js memory leaks).
- * - Morphing is calculated smoothly with single-pass vector interpolation.
- * - Point count is calibrated to 520 dots (under 0.3ms frame budget).
+ * Interactive Particle 3D Avatar System with smooth morphing transitions,
+ * MAX-inspired active glow pulse, and SARA-inspired floating "+" & sparkle accents.
  */
 @Composable
 fun ParticleAvatar3D(
@@ -219,82 +317,91 @@ fun ParticleAvatar3D(
     modifier: Modifier = Modifier,
     disableAnimations: Boolean = false
 ) {
-    // Generate precomputed shapes for all 3 forms
     val coreShape = remember { AvatarShapeGenerator.generatePoints(AvatarForm.CORE) }
     val femaleShape = remember { AvatarShapeGenerator.generatePoints(AvatarForm.FEMALE) }
     val maleShape = remember { AvatarShapeGenerator.generatePoints(AvatarForm.MALE) }
 
-    // Source and destination point lists for seamless morph animation
-    val currentPoints = remember { coreShape.toMutableList() }
     val targetShape = when (currentForm) {
         AvatarForm.CORE -> coreShape
         AvatarForm.FEMALE -> femaleShape
         AvatarForm.MALE -> maleShape
     }
 
-    // Morph progress animatable (0f -> 1f whenever currentForm switches)
+    // Initialize directly with targetShape so reopening the app never flashes CORE first.
+    val currentPoints = remember { targetShape.toMutableList() }
+    val startPoints = remember { targetShape.toMutableList() }
     val morphProgress = remember { Animatable(1f) }
+    var lastRenderedForm by remember { mutableStateOf(currentForm) }
 
-    // Start point snapshot when form changes
-    val startPoints = remember { coreShape.toMutableList() }
-
-    LaunchedEffect(currentForm) {
-        // Capture current snapshot as start
-        for (i in 0 until AvatarShapeGenerator.PARTICLE_COUNT) {
-            startPoints[i] = currentPoints[i]
+    // Ambient floating "+" crosshairs & sparkles around the perimeter
+    val sparkles = remember {
+        val rand = Random(108)
+        List(18) { idx ->
+            AmbientSparkle(
+                angleRad = (idx.toFloat() / 18f) * 2f * PI.toFloat() + (rand.nextFloat() - 0.5f) * 0.25f,
+                distanceFactor = 0.78f + rand.nextFloat() * 0.34f,
+                phaseOffset = rand.nextFloat() * 2f * PI.toFloat(),
+                speedMult = 0.7f + rand.nextFloat() * 0.6f,
+                isCrosshair = idx % 3 == 0,
+                sizeDp = 2.2f + rand.nextFloat() * 2.3f
+            )
         }
-        morphProgress.snapTo(0f)
-        morphProgress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMillis = 750, easing = LinearEasing)
-        )
     }
 
-    // Shimmer, rotation & floating physics transitions
+    LaunchedEffect(currentForm) {
+        if (lastRenderedForm != currentForm) {
+            for (i in 0 until AvatarShapeGenerator.PARTICLE_COUNT) {
+                startPoints[i] = currentPoints[i]
+            }
+            lastRenderedForm = currentForm
+            morphProgress.snapTo(0f)
+            morphProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing)
+            )
+        }
+    }
+
     val infiniteTransition = rememberInfiniteTransition(label = "particle_motion")
 
-    // Slow ambient rotation around Y axis (3D depth simulation)
     val rotationAngle by infiniteTransition.animateFloat(
         initialValue = -0.22f,
         targetValue = 0.22f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 4500, easing = LinearEasing),
+            animation = tween(durationMillis = 4800, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "ambient_rotate_y"
     )
 
-    // Breathing / floating vertical displacement
-    val floatOffset by infiniteTransition.animateFloat(
-        initialValue = -4.0f,
-        targetValue = 4.0f,
+    val floatPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2600, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
+            animation = tween(durationMillis = 5200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
         ),
-        label = "ambient_float_y"
+        label = "ambient_sparkle_phase"
     )
 
-    // Audio-reactive pulse shimmer multiplier
     val audioPulse by infiniteTransition.animateFloat(
-        initialValue = 0.9f,
-        targetValue = 1.35f,
+        initialValue = 0.88f,
+        targetValue = 1.28f,
         animationSpec = infiniteRepeatable(
             animation = tween(
                 durationMillis = when (status) {
-                    AssistantStatus.SPEAKING -> 400
-                    AssistantStatus.LISTENING -> 700
-                    AssistantStatus.PROCESSING -> 500
-                    else -> 1800
+                    AssistantStatus.SPEAKING -> 420
+                    AssistantStatus.LISTENING -> 650
+                    AssistantStatus.PROCESSING -> 520
+                    else -> 2100
                 },
-                easing = LinearEasing
+                easing = FastOutSlowInEasing
             ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "audio_pulse"
     )
 
-    // Status-driven energetic color tint
     val baseThemeColor = when (status) {
         AssistantStatus.SPEAKING -> ElectricCyan
         AssistantStatus.LISTENING -> WarningAmber
@@ -319,77 +426,117 @@ fun ParticleAvatar3D(
             val canvasWidth = size.width
             val canvasHeight = size.height
             val centerX = canvasWidth / 2f
-            val centerY = canvasHeight / 2f + (if (!disableAnimations) floatOffset else 0f)
-            val scaleRadius = (minOf(canvasWidth, canvasHeight) * 0.44f)
+            val floatOffsetPx = if (!disableAnimations) sin(floatPhase) * 3.5f * density else 0f
+            val centerY = canvasHeight / 2f + floatOffsetPx
+            val scaleRadius = minOf(canvasWidth, canvasHeight) * 0.42f
 
-            // Dynamic intensity multiplier
+            val pulseFactor = if (!disableAnimations) audioPulse else 1f
             val statusIntensity = when (status) {
-                AssistantStatus.SPEAKING -> 1.55f * audioPulse
-                AssistantStatus.LISTENING -> 1.35f * audioPulse
-                AssistantStatus.PROCESSING -> 1.25f * audioPulse
-                AssistantStatus.SLEEP -> 0.45f
-                else -> 1.0f * (if (!disableAnimations) audioPulse else 1f)
+                AssistantStatus.SPEAKING -> 1.45f * pulseFactor
+                AssistantStatus.LISTENING -> 1.35f * pulseFactor
+                AssistantStatus.PROCESSING -> 1.25f * pulseFactor
+                AssistantStatus.SLEEP -> 0.52f
+                else -> 1.05f * (0.94f + (pulseFactor - 0.88f) * 0.35f)
             }
 
-            // 1. Ambient Background Core Glow (Halo)
+            // 1. Soft transparent multi-layer ambient glow (no card/box border)
+            val outerGlowRadius = scaleRadius * 1.18f * (if (status == AssistantStatus.SPEAKING || status == AssistantStatus.LISTENING) 0.96f + (pulseFactor - 0.88f) * 0.25f else 1f)
             drawCircle(
-                color = glowHaloColor.copy(alpha = (0.09f * statusIntensity).coerceIn(0.04f, 0.28f)),
-                radius = scaleRadius * 0.95f,
-                center = Offset(centerX, centerY)
-            )
-            drawCircle(
-                color = baseThemeColor.copy(alpha = (0.16f * statusIntensity).coerceIn(0.06f, 0.45f)),
-                radius = scaleRadius * 0.5f,
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        baseThemeColor.copy(alpha = (0.24f * statusIntensity).coerceIn(0.06f, 0.38f)),
+                        glowHaloColor.copy(alpha = (0.10f * statusIntensity).coerceIn(0.03f, 0.20f)),
+                        Color.Transparent
+                    ),
+                    center = Offset(centerX, centerY),
+                    radius = outerGlowRadius
+                ),
+                radius = outerGlowRadius,
                 center = Offset(centerX, centerY)
             )
 
-            // Current morph factor
-            val t = morphProgress.value
-            // Ease curve for morphing
-            val morphT = (t * t * (3f - 2f * t)) // Smoothstep
+            // Subtle pulsing orbital ring when speaking or listening
+            if (status == AssistantStatus.SPEAKING || status == AssistantStatus.LISTENING) {
+                drawCircle(
+                    color = baseThemeColor.copy(alpha = (0.32f * (pulseFactor - 0.6f)).coerceIn(0.08f, 0.42f)),
+                    radius = scaleRadius * (0.86f + (pulseFactor - 0.88f) * 0.22f),
+                    center = Offset(centerX, centerY),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2f * density)
+                )
+            }
 
+            // 2. SARA-inspired floating "+" crosshairs and sparkle dots around the avatar
+            sparkles.forEach { sp ->
+                val phase = (if (!disableAnimations) floatPhase * sp.speedMult else 0f) + sp.phaseOffset
+                val driftY = sin(phase) * 5f * density
+                val driftX = cos(phase * 0.7f) * 3f * density
+                val sx = centerX + cos(sp.angleRad) * (scaleRadius * sp.distanceFactor) + driftX
+                val sy = (canvasHeight / 2f) + sin(sp.angleRad) * (scaleRadius * sp.distanceFactor) + driftY
+                val spAlpha = ((0.35f + 0.45f * ((sin(phase * 1.4f) + 1f) / 2f)) * (if (status == AssistantStatus.SLEEP) 0.4f else 1f)).coerceIn(0.1f, 0.85f)
+                val spColor = if (sp.isCrosshair) ElectricCyan.copy(alpha = spAlpha) else HologramBlue.copy(alpha = spAlpha * 0.85f)
+
+                if (sp.isCrosshair) {
+                    val arm = sp.sizeDp * density
+                    val strokeW = 1.1f * density
+                    drawLine(
+                        color = spColor,
+                        start = Offset(sx - arm, sy),
+                        end = Offset(sx + arm, sy),
+                        strokeWidth = strokeW,
+                        cap = StrokeCap.Round
+                    )
+                    drawLine(
+                        color = spColor,
+                        start = Offset(sx, sy - arm),
+                        end = Offset(sx, sy + arm),
+                        strokeWidth = strokeW,
+                        cap = StrokeCap.Round
+                    )
+                } else {
+                    drawCircle(
+                        color = spColor,
+                        radius = (sp.sizeDp * 0.45f) * density,
+                        center = Offset(sx, sy)
+                    )
+                }
+            }
+
+            // 3. Render 820 density-scaled 3D morphing particles
+            val morphT = morphProgress.value
             val rot = if (!disableAnimations) rotationAngle else 0f
             val cosRot = cos(rot)
             val sinRot = sin(rot)
 
-            // 2. Render all 520 morphing particles
             for (i in 0 until AvatarShapeGenerator.PARTICLE_COUNT) {
                 val p0 = startPoints[i]
                 val p1 = targetShape[i]
 
-                // Morph interpolated coordinates
                 val mx = p0.x + (p1.x - p0.x) * morphT
                 val my = p0.y + (p1.y - p0.y) * morphT
                 val mz = p0.z + (p1.z - p0.z) * morphT
                 val brightnessMult = p0.brightnessMultiplier + (p1.brightnessMultiplier - p0.brightnessMultiplier) * morphT
                 val isFace = p1.isFaceFeature
 
-                // Cache current state
                 currentPoints[i] = ParticlePoint(mx, my, mz, brightnessMult, isFace)
 
-                // 3D rotation transform around Y axis
                 val rotatedX = mx * cosRot - mz * sinRot
                 val rotatedZ = mx * sinRot + mz * cosRot
 
-                // Perspective projection with depth camera
                 val cameraDistance = 2.4f
                 val perspective = cameraDistance / (cameraDistance - rotatedZ * 0.55f)
 
                 val screenX = centerX + (rotatedX * scaleRadius * perspective)
                 val screenY = centerY + (my * scaleRadius * perspective)
 
-                // Depth shading: particles in front (positive z) are larger and brighter
-                val depthFactor = ((rotatedZ + 1.1f) / 2.2f).coerceIn(0.2f, 1.0f)
-                val particleRadius = (1.2f + depthFactor * 1.6f + if (isFace) 0.6f else 0f) * perspective
-                val alpha = ((0.35f + depthFactor * 0.65f) * brightnessMult * (statusIntensity * 0.85f)).coerceIn(0.12f, 1.0f)
+                val depthFactor = ((rotatedZ + 1.0f) / 2.0f).coerceIn(0.22f, 1.0f)
+                // Density-scaled radius so particles are crisp on high-DPI phones & emulators
+                val particleRadius = (0.95f + depthFactor * 1.25f + if (isFace) 0.55f else 0f) * density * perspective
+                val alpha = ((0.40f + depthFactor * 0.60f) * brightnessMult * (statusIntensity * 0.85f)).coerceIn(0.18f, 1.0f)
 
-                val particleColor = if (isFace) {
-                    // Face core shines with luminous cyan-white
-                    Color.White.copy(alpha = alpha)
-                } else if (depthFactor > 0.75f) {
-                    baseThemeColor.copy(alpha = alpha)
-                } else {
-                    HologramBlue.copy(alpha = alpha * 0.8f)
+                val particleColor = when {
+                    isFace -> Color.White.copy(alpha = alpha)
+                    depthFactor > 0.70f -> baseThemeColor.copy(alpha = alpha)
+                    else -> HologramBlue.copy(alpha = alpha * 0.88f)
                 }
 
                 drawCircle(
@@ -404,7 +551,7 @@ fun ParticleAvatar3D(
 
 /**
  * Segmented 3-Option Avatar Selector Tab Bar ("CORE", "FEMALE", "MALE").
- * High-tech pill button group with glowing border and cyan highlight on selected option.
+ * Sleek pill group with glowing cyan highlight on selected option and accessible touch targets.
  */
 @Composable
 fun AvatarFormSelector(
@@ -414,9 +561,9 @@ fun AvatarFormSelector(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(22.dp))
-            .background(SurfaceDark.copy(alpha = 0.85f))
-            .border(1.dp, GlassBorderCyan, RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(24.dp))
+            .background(SurfaceDark.copy(alpha = 0.72f))
+            .border(1.dp, GlassBorderCyan, RoundedCornerShape(24.dp))
             .padding(3.dp)
             .testTag("avatar_form_selector_bar")
     ) {
@@ -428,37 +575,29 @@ fun AvatarFormSelector(
             AvatarForm.entries.forEach { form ->
                 val isSelected = form == selectedForm
                 val containerColor = if (isSelected) ElectricCyan.copy(alpha = 0.22f) else Color.Transparent
-                val borderColor = if (isSelected) ElectricCyan else Color.Transparent
+                val borderColor = if (isSelected) ElectricCyan.copy(alpha = 0.9f) else Color.Transparent
                 val textColor = if (isSelected) ElectricCyan else TextSecondary
 
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(18.dp))
+                        .defaultMinSize(minHeight = 40.dp)
+                        .clip(RoundedCornerShape(20.dp))
                         .background(containerColor)
-                        .border(1.dp, borderColor, RoundedCornerShape(18.dp))
+                        .border(1.dp, borderColor, RoundedCornerShape(20.dp))
                         .clickable { onSelectForm(form) }
-                        .padding(vertical = 6.dp)
+                        .padding(vertical = 8.dp, horizontal = 6.dp)
                         .testTag("avatar_tab_${form.name.lowercase()}"),
                     contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = form.icon,
-                            fontSize = 11.sp
-                        )
-                        Text(
-                            text = form.label,
-                            color = textColor,
-                            fontSize = 10.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 0.8.sp
-                        )
-                    }
+                    Text(
+                        text = form.label,
+                        color = textColor,
+                        fontSize = 10.5.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
                 }
             }
         }

@@ -108,7 +108,15 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     private val _assistantStatus = MutableStateFlow(AssistantStatus.IDLE)
     val assistantStatus: StateFlow<AssistantStatus> = _assistantStatus.asStateFlow()
 
-    private val _latestResponse = MutableStateFlow("Namaste Boss! Mai ARC hu, aapka AI Voice Assistant.")
+    private val _weatherTemp = MutableStateFlow("26°C")
+    val weatherTemp: StateFlow<String> = _weatherTemp.asStateFlow()
+
+    private val _weatherCondition = MutableStateFlow("Clear Sky")
+    val weatherCondition: StateFlow<String> = _weatherCondition.asStateFlow()
+
+    private var hasAutoGreeted = false
+
+    private val _latestResponse = MutableStateFlow("Hello Boss! Mai ARC hu, aapka AI Voice Assistant.")
     val latestResponse: StateFlow<String> = _latestResponse.asStateFlow()
 
     private val _lastQuery = MutableStateFlow("")
@@ -178,26 +186,75 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
             _isPermissionsGranted.value = hasCompletedPermissions
 
             if (isComplete) {
-                _latestResponse.value = "Namaste $savedName! Mai ARIA hu, aapka AI Voice Assistant."
+                _latestResponse.value = "Hello $savedName! Mai ARC hu, aapka AI Voice Assistant."
             } else {
-                _latestResponse.value = "Namaste Boss! Mai ARC hu, aapka AI Voice Assistant."
+                _latestResponse.value = "Hello Boss! Mai ARC hu, aapka AI Voice Assistant."
             }
 
             _isInitializing.value = false
 
             if (isComplete && hasCompletedPermissions) {
                 triggerBriefingSummary()
+            } else {
+                refreshWeatherBadge()
             }
         }
     }
 
-    fun triggerBriefingSummary() {
+    fun refreshWeatherBadge() {
+        viewModelScope.launch {
+            val snap = commandProcessor.fetchWeatherSnapshot("Delhi")
+            _weatherTemp.value = snap.tempDisplay
+            _weatherCondition.value = snap.condition
+        }
+    }
+
+    fun triggerBriefingSummary(listenAfter: Boolean = false) {
         viewModelScope.launch {
             _assistantStatus.value = AssistantStatus.PROCESSING
+            val snap = commandProcessor.fetchWeatherSnapshot("Delhi")
+            _weatherTemp.value = snap.tempDisplay
+            _weatherCondition.value = snap.condition
+
             val briefingText = commandProcessor.generateBriefingSummary(_userName.value)
+            hasAutoGreeted = true
             _latestResponse.value = briefingText
-            _assistantStatus.value = AssistantStatus.IDLE
+            addActivityLog("☀️", "Auto Greeting & Briefing", "${snap.city} ${snap.tempDisplay}")
             speakResponse(briefingText)
+
+            if (listenAfter && !speechEngine.isMuted.value) {
+                kotlinx.coroutines.delay(500)
+                val startWait = System.currentTimeMillis()
+                while (speechEngine.isSpeaking.value && System.currentTimeMillis() - startWait < 12000L) {
+                    kotlinx.coroutines.delay(250)
+                }
+                if (_assistantStatus.value != AssistantStatus.SLEEP) {
+                    startListening()
+                }
+            }
+        }
+    }
+
+    fun activateArcWithGreeting() {
+        when (_assistantStatus.value) {
+            AssistantStatus.SLEEP -> {
+                _assistantStatus.value = AssistantStatus.IDLE
+                triggerBriefingSummary(listenAfter = true)
+            }
+            AssistantStatus.LISTENING -> {
+                speechEngine.stopListening()
+                _assistantStatus.value = AssistantStatus.IDLE
+            }
+            AssistantStatus.SPEAKING -> {
+                stopSpeaking()
+            }
+            else -> {
+                if (!hasAutoGreeted) {
+                    triggerBriefingSummary(listenAfter = true)
+                } else {
+                    startListening()
+                }
+            }
         }
     }
 
@@ -255,15 +312,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         val parseResult = AriaSpeechEngine.parseWakeWord(query)
         if (parseResult.hasWakeWord && parseResult.isOnlyWakeWord) {
             _lastQuery.value = query
-            _assistantStatus.value = AssistantStatus.PROCESSING
-            val reply = "Haan Boss! Mai sun rahi hu, boliye kya karna hai?"
-            _latestResponse.value = reply
-            addActivityLog("💬", "Response generated", reply)
-            speakResponse(reply)
-            viewModelScope.launch {
-                kotlinx.coroutines.delay(1800)
-                startListening()
-            }
+            triggerBriefingSummary(listenAfter = true)
             return
         }
 
@@ -326,7 +375,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
 
     fun wakeUp() {
         _assistantStatus.value = AssistantStatus.IDLE
-        speakResponse("ARC active and ready, Boss!")
+        triggerBriefingSummary(listenAfter = false)
     }
 
     fun toggleSleepMode() {
