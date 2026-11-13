@@ -37,9 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.CyberCyan
-import com.example.ui.theme.ElectricBlue
-import com.example.ui.theme.ElectricEmerald
-import com.example.ui.theme.WarningAmber
+import com.example.ui.theme.HologramBlue
 
 /**
  * Animated Pulse & Sound Wave Visual Indicator shown when ARIA is actively listening for voice input.
@@ -171,35 +169,13 @@ fun ListeningPulseIndicator(
             .testTag("listening_pulse_indicator"),
         contentAlignment = Alignment.Center
     ) {
-        // Outer Radar Ripple Rings
-        Canvas(modifier = Modifier.size(160.dp)) {
-            val center = Offset(size.width / 2, size.height / 2)
-            val baseRadius = size.width / 4f
-
-            // Ripple 1
-            drawCircle(
-                color = WarningAmber.copy(alpha = ripple1Alpha),
-                radius = baseRadius * ripple1Scale,
-                center = center,
-                style = Stroke(width = 2.dp.toPx())
-            )
-
-            // Ripple 2
-            drawCircle(
-                color = CyberCyan.copy(alpha = ripple2Alpha),
-                radius = baseRadius * ripple2Scale,
-                center = center,
-                style = Stroke(width = 1.5.dp.toPx())
-            )
-        }
-
-        // Sound Wave Bar Row pill below mic
+        // Sound Wave Bar Row pill (pure cyan/blue palette)
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(16.dp))
-                .background(Color.Black.copy(alpha = 0.6f))
-                .border(1.dp, WarningAmber.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .background(Color.Black.copy(alpha = 0.55f))
+                .border(1.dp, CyberCyan.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                .padding(horizontal = 12.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
@@ -208,7 +184,7 @@ fun ListeningPulseIndicator(
                     .width(4.dp)
                     .height(bar1Height.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(WarningAmber)
+                    .background(HologramBlue)
             )
             Spacer(modifier = Modifier.width(4.dp))
             Box(
@@ -224,7 +200,7 @@ fun ListeningPulseIndicator(
                     .width(4.dp)
                     .height(bar3Height.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(WarningAmber)
+                    .background(HologramBlue)
             )
             Spacer(modifier = Modifier.width(4.dp))
             Box(
@@ -237,8 +213,8 @@ fun ListeningPulseIndicator(
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "LISTENING",
-                color = WarningAmber,
-                fontSize = 11.sp,
+                color = CyberCyan,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp
             )

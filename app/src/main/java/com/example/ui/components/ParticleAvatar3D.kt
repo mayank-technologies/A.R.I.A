@@ -22,12 +22,9 @@ import androidx.compose.ui.graphics.PointMode
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.example.ui.AssistantStatus
-import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.HologramBlue
-import com.example.ui.theme.ReactorGold
-import com.example.ui.theme.WarningAmber
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.pow
@@ -185,21 +182,10 @@ fun ParticleAvatar3D(
         label = "sphere_audio_pulse"
     )
 
-    val baseThemeColor = when (status) {
-        AssistantStatus.SPEAKING -> ElectricCyan
-        AssistantStatus.LISTENING -> WarningAmber
-        AssistantStatus.PROCESSING -> HologramBlue
-        AssistantStatus.SLEEP -> Color(0xFF64748B)
-        else -> CyberCyan
-    }
-
-    val outerDiffusionColor = when (status) {
-        AssistantStatus.SPEAKING -> ReactorGold
-        AssistantStatus.LISTENING -> WarningAmber
-        AssistantStatus.PROCESSING -> ElectricBlue
-        AssistantStatus.SLEEP -> Color(0xFF1E293B)
-        else -> ElectricBlue
-    }
+    // Fixed blue/cyan palette: state ONLY changes animation speed & glow intensity, never color.
+    val isSleep = status == AssistantStatus.SLEEP
+    val baseThemeColor = if (isSleep) Color(0xFF64748B) else ElectricCyan
+    val outerDiffusionColor = if (isSleep) Color(0xFF1E293B) else ElectricBlue
 
     Box(
         modifier = modifier,
@@ -217,7 +203,6 @@ fun ParticleAvatar3D(
             // Sphere radius leaves generous margin for outer soft-light diffusion without clipping
             val sphereRadius = minDim * 0.34f
             val pulse = if (!disableAnimations) audioPulse else 1f
-            val isSleep = status == AssistantStatus.SLEEP
 
             val statusAlphaBoost = when (status) {
                 AssistantStatus.SPEAKING -> 1.15f

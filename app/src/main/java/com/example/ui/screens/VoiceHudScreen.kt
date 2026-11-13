@@ -362,7 +362,7 @@ fun VoiceHudScreen(
                     }
                     val subtitleColor = when {
                         !isArcPoweredOn || assistantStatus == AssistantStatus.SLEEP -> TextMuted
-                        assistantStatus == AssistantStatus.LISTENING -> WarningAmber
+                        assistantStatus == AssistantStatus.LISTENING -> ElectricCyan
                         assistantStatus == AssistantStatus.PROCESSING -> HologramBlue
                         assistantStatus == AssistantStatus.SPEAKING -> ElectricCyan
                         else -> TextSecondary
@@ -970,7 +970,6 @@ private fun ArcPowerButton(
 
     val ringColor = when {
         !isPoweredOn -> TextMuted.copy(alpha = 0.42f)
-        assistantStatus == AssistantStatus.LISTENING -> WarningAmber
         assistantStatus == AssistantStatus.SPEAKING -> ElectricEmerald
         else -> ElectricCyan
     }
@@ -1067,7 +1066,6 @@ private fun BottomHudActionRow(
     )
 
     val micAccent = when (assistantStatus) {
-        AssistantStatus.LISTENING -> WarningAmber
         AssistantStatus.SPEAKING -> ElectricEmerald
         AssistantStatus.PROCESSING -> HologramBlue
         else -> ElectricCyan
