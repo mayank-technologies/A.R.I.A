@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.WbSunny
@@ -100,7 +101,6 @@ import com.example.assistant.battery.AriaBatterySaverManager
 import com.example.geminilive.GeminiLiveSessionState
 import com.example.ui.AriaViewModel
 import com.example.ui.AssistantStatus
-import com.example.ui.components.AvatarFormSelector
 import com.example.ui.components.ListeningPulseIndicator
 import com.example.ui.components.ParticleAvatar3D
 import com.example.ui.theme.CarbonBlack
@@ -149,6 +149,7 @@ fun VoiceHudScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val assistantStatus by viewModel.assistantStatus.collectAsState()
+    val isArcPoweredOn by viewModel.isArcPoweredOn.collectAsState()
     val weatherTemp by viewModel.weatherTemp.collectAsState()
     val latestResponse by viewModel.latestResponse.collectAsState()
     val lastQuery by viewModel.lastQuery.collectAsState()
@@ -159,7 +160,6 @@ fun VoiceHudScreen(
     val isMuted by viewModel.isMuted.collectAsState()
     val isSpeaking by viewModel.isSpeaking.collectAsState()
     val isWakeWordModeEnabled by viewModel.isWakeWordModeEnabled.collectAsState()
-    val currentAvatarForm by viewModel.avatarForm.collectAsState()
     val isGeminiLiveMode by viewModel.isGeminiLiveMode.collectAsState()
     val geminiLiveState by viewModel.geminiLiveManager.sessionState.collectAsState()
 
@@ -224,8 +224,8 @@ fun VoiceHudScreen(
                     )
                 )
         ) {
-            val isCompactHeight = maxHeight < 620.dp
-            val avatarSize = if (isCompactHeight) 184.dp else 232.dp
+            val isCompactHeight = maxHeight < 640.dp
+            val avatarSize = if (isCompactHeight) 188.dp else 236.dp
             val scrollState = rememberScrollState()
 
             Column(
@@ -278,14 +278,14 @@ fun VoiceHudScreen(
                         modifier = Modifier.align(Alignment.Center)
                     )
 
-                    // Right: Compact ONLINE / STANDBY Status Pill
-                    val isStandby = assistantStatus == AssistantStatus.SLEEP
+                    // Right: Compact ONLINE / STANDBY Status Pill (Synced with Power-Button & Routines)
+                    val isStandby = !isArcPoweredOn || assistantStatus == AssistantStatus.SLEEP
                     val statusBadgeColor = if (isStandby) WarningAmber else ElectricEmerald
                     Box(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .defaultMinSize(minHeight = 48.dp)
-                            .clickable { viewModel.toggleSleepMode() }
+                            .clickable { viewModel.toggleArcPower() }
                             .testTag("standby_toggle_button"),
                         contentAlignment = Alignment.CenterEnd
                     ) {
@@ -317,54 +317,55 @@ fun VoiceHudScreen(
                 }
 
                 // -------------------------------------------------------------
-                // 2. CENTRAL TRANSPARENT 3D PARTICLE AVATAR + FORM SELECTOR + STATUS
+                // 2. CENTRAL TRANSPARENT CORE PARTICLE AVATAR + POWER BUTTON + STATUS
                 // -------------------------------------------------------------
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Transparent circular glow frame (NO card/box border, NO center overlay blocking the avatar)
+                    val effectiveStatus = if (isArcPoweredOn) assistantStatus else AssistantStatus.SLEEP
+
+                    // Transparent unclipped glow frame for the dense CORE particle sphere
                     Box(
                         modifier = Modifier
                             .size(avatarSize)
-                            .clip(CircleShape)
                             .clickable { viewModel.activateArcWithGreeting() }
                             .testTag("central_activate_arc_orb"),
                         contentAlignment = Alignment.Center
                     ) {
                         ParticleAvatar3D(
-                            currentForm = currentAvatarForm,
-                            status = assistantStatus,
-                            disableAnimations = isBatterySaverActive,
+                            status = effectiveStatus,
+                            disableAnimations = isBatterySaverActive || !isArcPoweredOn,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Segmented Form Switcher ("CORE", "FEMALE", "MALE")
-                    AvatarFormSelector(
-                        selectedForm = currentAvatarForm,
-                        onSelectForm = { viewModel.setAvatarForm(it) },
-                        modifier = Modifier.widthIn(max = 276.dp)
+                    // MAX-Inspired Central Circular Power-Button Toggle (ON = pulsing glow, OFF = dim slate)
+                    ArcPowerButton(
+                        isPoweredOn = isArcPoweredOn,
+                        assistantStatus = effectiveStatus,
+                        disableAnimations = isBatterySaverActive,
+                        onToggle = { viewModel.toggleArcPower() }
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    // Centered Status Subtitle (MAX-inspired muted/glowing caption)
-                    val subtitleText = when (assistantStatus) {
-                        AssistantStatus.LISTENING -> "LISTENING..."
-                        AssistantStatus.PROCESSING -> "THINKING..."
-                        AssistantStatus.SPEAKING -> "SPEAKING..."
-                        AssistantStatus.SLEEP -> "STANDBY"
-                        AssistantStatus.IDLE -> "ARC VOICE ASSISTANT"
+                    // Centered Status Subtitle ("TAP TO START" when OFF, active state when ON)
+                    val subtitleText = when {
+                        !isArcPoweredOn || assistantStatus == AssistantStatus.SLEEP -> "TAP TO START"
+                        assistantStatus == AssistantStatus.LISTENING -> "LISTENING..."
+                        assistantStatus == AssistantStatus.PROCESSING -> "THINKING..."
+                        assistantStatus == AssistantStatus.SPEAKING -> "SPEAKING..."
+                        else -> "ARC VOICE ASSISTANT"
                     }
-                    val subtitleColor = when (assistantStatus) {
-                        AssistantStatus.LISTENING -> WarningAmber
-                        AssistantStatus.PROCESSING -> HologramBlue
-                        AssistantStatus.SPEAKING -> ElectricCyan
-                        AssistantStatus.SLEEP -> TextMuted
-                        AssistantStatus.IDLE -> TextSecondary
+                    val subtitleColor = when {
+                        !isArcPoweredOn || assistantStatus == AssistantStatus.SLEEP -> TextMuted
+                        assistantStatus == AssistantStatus.LISTENING -> WarningAmber
+                        assistantStatus == AssistantStatus.PROCESSING -> HologramBlue
+                        assistantStatus == AssistantStatus.SPEAKING -> ElectricCyan
+                        else -> TextSecondary
                     }
 
                     Text(
@@ -375,7 +376,7 @@ fun VoiceHudScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontFamily = FontFamily.Monospace,
                             letterSpacing = 2.6.sp,
-                            shadow = if (assistantStatus != AssistantStatus.SLEEP) {
+                            shadow = if (isArcPoweredOn && assistantStatus != AssistantStatus.SLEEP) {
                                 Shadow(
                                     color = subtitleColor.copy(alpha = 0.45f),
                                     offset = Offset(0f, 0f),
@@ -387,12 +388,14 @@ fun VoiceHudScreen(
                         modifier = Modifier.testTag("arc_status_subtitle")
                     )
 
-                    // Subtle audio waveform indicator only while listening
+                    // Subtle audio waveform indicator only while powered ON and listening
                     ListeningPulseIndicator(
-                        isListening = assistantStatus == AssistantStatus.LISTENING ||
-                                geminiLiveState == GeminiLiveSessionState.LISTENING,
+                        isListening = isArcPoweredOn && (
+                            assistantStatus == AssistantStatus.LISTENING ||
+                                geminiLiveState == GeminiLiveSessionState.LISTENING
+                            ),
                         disableAnimations = isBatterySaverActive,
-                        modifier = Modifier.padding(top = 6.dp)
+                        modifier = Modifier.padding(top = 4.dp)
                     )
                 }
 
@@ -931,6 +934,106 @@ private fun HudInfoPill(
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/**
+ * MAX-inspired circular Power-Button toggle.
+ * - ON: Glowing cyan/emerald ring border with smooth pulsing radial halo.
+ * - OFF: Dim muted grey outline with static non-glowing power icon.
+ */
+@Composable
+private fun ArcPowerButton(
+    isPoweredOn: Boolean,
+    assistantStatus: AssistantStatus,
+    disableAnimations: Boolean,
+    onToggle: () -> Unit
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "power_btn_pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = if (isPoweredOn && !disableAnimations) 1.18f else 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = when (assistantStatus) {
+                    AssistantStatus.SPEAKING, AssistantStatus.LISTENING -> 850
+                    else -> 1800
+                },
+                easing = FastOutSlowInEasing
+            ),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "power_halo_scale"
+    )
+
+    val ringColor = when {
+        !isPoweredOn -> TextMuted.copy(alpha = 0.42f)
+        assistantStatus == AssistantStatus.LISTENING -> WarningAmber
+        assistantStatus == AssistantStatus.SPEAKING -> ElectricEmerald
+        else -> ElectricCyan
+    }
+    val iconColor = if (isPoweredOn) ringColor else TextMuted
+
+    Box(
+        modifier = Modifier.size(78.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        // Outer pulsing glow halo only when ARC is ON
+        if (isPoweredOn) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .scale(pulseScale)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                ringColor.copy(alpha = 0.34f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+        }
+
+        // Main 60dp circular power button (>= 48dp accessible touch target)
+        Box(
+            modifier = Modifier
+                .size(60.dp)
+                .clip(CircleShape)
+                .background(
+                    if (isPoweredOn) {
+                        Brush.radialGradient(
+                            colors = listOf(
+                                ringColor.copy(alpha = 0.24f),
+                                SurfaceDark.copy(alpha = 0.92f)
+                            )
+                        )
+                    } else {
+                        Brush.radialGradient(
+                            colors = listOf(
+                                SurfaceDark.copy(alpha = 0.55f),
+                                CarbonBlack
+                            )
+                        )
+                    }
+                )
+                .border(
+                    width = if (isPoweredOn) 2.dp else 1.2.dp,
+                    color = ringColor,
+                    shape = CircleShape
+                )
+                .clickable(onClick = onToggle)
+                .testTag("arc_power_button"),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.PowerSettingsNew,
+                contentDescription = if (isPoweredOn) "Turn ARC Off" else "Turn ARC On",
+                tint = iconColor,
+                modifier = Modifier.size(28.dp)
             )
         }
     }

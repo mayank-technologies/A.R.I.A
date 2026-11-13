@@ -108,6 +108,15 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     private val _assistantStatus = MutableStateFlow(AssistantStatus.IDLE)
     val assistantStatus: StateFlow<AssistantStatus> = _assistantStatus.asStateFlow()
 
+    /**
+     * Unified ARC Power ON/OFF state shared across:
+     * 1. Central circular Power-Button toggle
+     * 2. Top-right ONLINE / STANDBY badge
+     * 3. "Good Morning ARC" & "Good Night ARC" voice routines
+     */
+    private val _isArcPoweredOn = MutableStateFlow(true)
+    val isArcPoweredOn: StateFlow<Boolean> = _isArcPoweredOn.asStateFlow()
+
     private val _weatherTemp = MutableStateFlow("26°C")
     val weatherTemp: StateFlow<String> = _weatherTemp.asStateFlow()
 
@@ -153,21 +162,16 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     )
     val memoryFacts: StateFlow<List<MemoryFactItem>> = _memoryFacts.asStateFlow()
 
-    private val _avatarForm = MutableStateFlow(
-        com.example.ui.components.AvatarForm.fromString(
-            prefs.getString("arc_avatar_form", com.example.ui.components.AvatarForm.CORE.name)
-        )
-    )
-    val avatarForm: StateFlow<com.example.ui.components.AvatarForm> = _avatarForm.asStateFlow()
-
-    fun setAvatarForm(form: com.example.ui.components.AvatarForm) {
-        _avatarForm.value = form
-        prefs.edit().putString("arc_avatar_form", form.name).apply()
-        android.util.Log.d("ARC_AVATAR", "Avatar form switched to: ${form.name} and persisted to prefs")
-    }
-
     init {
         checkOnboardingStatus()
+        // Single lifecycle-scoped observer to return SPEAKING -> IDLE only while ARC is powered ON
+        viewModelScope.launch {
+            speechEngine.isSpeaking.collect { speaking ->
+                if (!speaking && _isArcPoweredOn.value && _assistantStatus.value == AssistantStatus.SPEAKING) {
+                    _assistantStatus.value = AssistantStatus.IDLE
+                }
+            }
+        }
     }
 
     private fun checkOnboardingStatus() {
@@ -236,11 +240,11 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun activateArcWithGreeting() {
+        if (!_isArcPoweredOn.value || _assistantStatus.value == AssistantStatus.SLEEP) {
+            powerOnArc()
+            return
+        }
         when (_assistantStatus.value) {
-            AssistantStatus.SLEEP -> {
-                _assistantStatus.value = AssistantStatus.IDLE
-                triggerBriefingSummary(listenAfter = true)
-            }
             AssistantStatus.LISTENING -> {
                 speechEngine.stopListening()
                 _assistantStatus.value = AssistantStatus.IDLE
@@ -255,6 +259,80 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
                     startListening()
                 }
             }
+        }
+    }
+
+    /**
+     * Unified Power Toggle used by the central MAX-style Power-Button and Standby badge.
+     */
+    fun toggleArcPower() {
+        if (_isArcPoweredOn.value) {
+            powerOffArc()
+        } else {
+            powerOnArc()
+        }
+    }
+
+    /**
+     * Turns ARC ON: activates glowing state, starts wake-word listening, and speaks greeting/briefing.
+     */
+    fun powerOnArc() {
+        _isArcPoweredOn.value = true
+        _assistantStatus.value = AssistantStatus.IDLE
+
+        speechEngine.setWakeWordModeEnabled(true)
+        prefs.edit().putBoolean("wake_word_enabled", true).apply()
+
+        try {
+            com.example.assistant.overlay.AriaEdgeGlowOverlayManager.updateGlowState(
+                com.example.assistant.overlay.AriaEdgeGlowView.GlowState.SPEAKING
+            )
+        } catch (_: Exception) {
+        }
+
+        addActivityLog("⚡", "ARC Powered ON", "Wake-word active & briefing started")
+        triggerBriefingSummary(listenAfter = true)
+    }
+
+    /**
+     * Turns ARC OFF (same effect as "Good Night ARC" routine):
+     * Stops wake-word & background listening, dims avatar to static standby, and speaks farewell.
+     */
+    fun powerOffArc(customFarewell: String? = null) {
+        val displayName = _userName.value.ifBlank { "Boss" }
+        val farewell = customFarewell
+            ?: "Good night, $displayName! ARC standby mode me ja raha hai taaki phone battery save ho sake. Tap power button to start!"
+
+        _isArcPoweredOn.value = false
+        _assistantStatus.value = AssistantStatus.SLEEP
+
+        speechEngine.setWakeWordModeEnabled(false)
+        speechEngine.stopListening()
+        speechEngine.stopSpeaking()
+        prefs.edit().putBoolean("wake_word_enabled", false).apply()
+
+        if (_isGeminiLiveMode.value) {
+            _isGeminiLiveMode.value = false
+            prefs.edit().putBoolean("arc_gemini_live_mode", false).apply()
+            geminiLiveManager.stopLiveSession()
+        }
+
+        try {
+            com.example.assistant.background.AriaBackgroundWakeService.stop(getApplication())
+        } catch (_: Exception) {
+        }
+
+        try {
+            com.example.assistant.overlay.AriaEdgeGlowOverlayManager.hideEdgeGlow()
+        } catch (_: Exception) {
+        }
+
+        _latestResponse.value = farewell
+        addActivityLog("🌙", "ARC Powered OFF", "Standby mode & wake-word paused")
+
+        if (!speechEngine.isMuted.value) {
+            // Speak farewell without switching UI status back out of SLEEP
+            speechEngine.speak(farewell)
         }
     }
 
@@ -318,21 +396,39 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
 
         val actualQuery = if (parseResult.hasWakeWord && parseResult.command.isNotBlank()) parseResult.command else query
         _lastQuery.value = query
+        if (!_isArcPoweredOn.value) {
+            _isArcPoweredOn.value = true
+        }
         _assistantStatus.value = AssistantStatus.PROCESSING
         addActivityLog("⚙️", "Planning response", "Processing intent: \"$actualQuery\"")
 
         viewModelScope.launch {
-            val result = commandProcessor.processCommand(actualQuery)
+            val result = commandProcessor.processCommand(actualQuery, _userName.value)
             when (result) {
                 is AriaCommandResult.TextResponse -> {
-                    _latestResponse.value = result.response
-                    addActivityLog("💬", "Response generated", result.response.take(60) + if (result.response.length > 60) "..." else "")
-                    if (result.openUrl != null) {
-                        _pendingWebUrl.value = result.openUrl
-                        _activeWebUrl.value = result.openUrl
-                        addActivityLog("🌐", "Web URL opened", result.openUrl)
+                    when (result.routineAction) {
+                        "GOOD_NIGHT" -> {
+                            powerOffArc(customFarewell = result.response)
+                        }
+                        "GOOD_MORNING" -> {
+                            _isArcPoweredOn.value = true
+                            speechEngine.setWakeWordModeEnabled(true)
+                            prefs.edit().putBoolean("wake_word_enabled", true).apply()
+                            _latestResponse.value = result.response
+                            addActivityLog("☀️", "Good Morning Routine", "ARC powered ON & wake-word active")
+                            speakResponse(result.response)
+                        }
+                        else -> {
+                            _latestResponse.value = result.response
+                            addActivityLog("💬", "Response generated", result.response.take(60) + if (result.response.length > 60) "..." else "")
+                            if (result.openUrl != null) {
+                                _pendingWebUrl.value = result.openUrl
+                                _activeWebUrl.value = result.openUrl
+                                addActivityLog("🌐", "Web URL opened", result.openUrl)
+                            }
+                            speakResponse(result.response)
+                        }
                     }
-                    speakResponse(result.response)
                 }
                 is AriaCommandResult.LaunchApp -> {
                     _latestResponse.value = result.response
@@ -351,44 +447,37 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startListening() {
-        if (_assistantStatus.value == AssistantStatus.SLEEP) {
+        if (!_isArcPoweredOn.value || _assistantStatus.value == AssistantStatus.SLEEP) {
+            _isArcPoweredOn.value = true
             _assistantStatus.value = AssistantStatus.IDLE
         }
         _assistantStatus.value = AssistantStatus.LISTENING
         speechEngine.startListening { recognizedText ->
             if (recognizedText.isNotBlank()) {
                 submitTextCommand(recognizedText)
-            } else {
+            } else if (_isArcPoweredOn.value) {
                 _assistantStatus.value = AssistantStatus.IDLE
             }
         }
     }
 
     fun enterSleepMode() {
-        if (_assistantStatus.value == AssistantStatus.LISTENING) {
-            speechEngine.stopListening()
-        }
-        speechEngine.stopSpeaking()
-        _assistantStatus.value = AssistantStatus.SLEEP
-        _latestResponse.value = "ARC in low-power Standby Mode. Tap 'Wake Up' or Mic button to activate."
+        powerOffArc()
     }
 
     fun wakeUp() {
-        _assistantStatus.value = AssistantStatus.IDLE
-        triggerBriefingSummary(listenAfter = false)
+        powerOnArc()
     }
 
     fun toggleSleepMode() {
-        if (_assistantStatus.value == AssistantStatus.SLEEP) {
-            wakeUp()
-        } else {
-            enterSleepMode()
-        }
+        toggleArcPower()
     }
 
     fun stopSpeaking() {
         speechEngine.stopSpeaking()
-        _assistantStatus.value = AssistantStatus.IDLE
+        if (_isArcPoweredOn.value) {
+            _assistantStatus.value = AssistantStatus.IDLE
+        }
     }
 
     fun toggleTtsMute(): Boolean {
@@ -407,19 +496,15 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun speakResponse(text: String) {
         if (speechEngine.isMuted.value) {
-            _assistantStatus.value = AssistantStatus.IDLE
+            if (_isArcPoweredOn.value) {
+                _assistantStatus.value = AssistantStatus.IDLE
+            }
             return
         }
-        _assistantStatus.value = AssistantStatus.SPEAKING
-        speechEngine.speak(text)
-        viewModelScope.launch {
-            // Monitor speaking status
-            speechEngine.isSpeaking.collect { isSpeaking ->
-                if (!isSpeaking && _assistantStatus.value == AssistantStatus.SPEAKING) {
-                    _assistantStatus.value = AssistantStatus.IDLE
-                }
-            }
+        if (_isArcPoweredOn.value) {
+            _assistantStatus.value = AssistantStatus.SPEAKING
         }
+        speechEngine.speak(text)
     }
 
     fun openWebUrlInApp(url: String) {

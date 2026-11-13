@@ -19,7 +19,12 @@ import java.util.Date
 import java.util.Locale
 
 sealed class AriaCommandResult {
-    data class TextResponse(val response: String, val category: String, val openUrl: String? = null) : AriaCommandResult()
+    data class TextResponse(
+        val response: String,
+        val category: String,
+        val openUrl: String? = null,
+        val routineAction: String? = null
+    ) : AriaCommandResult()
     data class LaunchApp(val response: String, val appType: String) : AriaCommandResult()
     data class CloseBrowser(val response: String) : AriaCommandResult()
 }
@@ -29,17 +34,22 @@ class AriaCommandProcessor(
     private val ariaDao: AriaDao
 ) {
 
-    suspend fun processCommand(userQuery: String): AriaCommandResult = withContext(Dispatchers.IO) {
+    suspend fun processCommand(userQuery: String, userName: String = "Boss"): AriaCommandResult = withContext(Dispatchers.IO) {
         val queryLower = userQuery.lowercase(Locale.ROOT).trim()
+        val displayName = userName.ifBlank { "Boss" }
 
-        // 0.4 Custom Routines ("Good Morning ARIA", "Good Night ARIA", "office jaana hai")
+        // 0.4 Custom Routines ("Good Morning ARC", "Good Night ARC", "office jaana hai")
         if (RoutineManager.isRoutineCommand(queryLower)) {
             val routineMgr = RoutineManager(context, ariaDao)
-            val res = routineMgr.executeRoutine(userQuery, "Boss")
+            val res = routineMgr.executeRoutine(userQuery, displayName)
             when (res) {
                 is RoutineResult.Success -> {
                     saveHistory(userQuery, res.speechResponse, "ROUTINE")
-                    return@withContext AriaCommandResult.TextResponse(res.speechResponse, "ROUTINE")
+                    return@withContext AriaCommandResult.TextResponse(
+                        response = res.speechResponse,
+                        category = "ROUTINE",
+                        routineAction = res.routineName
+                    )
                 }
             }
         }

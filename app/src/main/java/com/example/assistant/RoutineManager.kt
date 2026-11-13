@@ -68,10 +68,11 @@ class RoutineManager(
     }
 
     private suspend fun executeGoodNightRoutine(userName: String): RoutineResult {
+        val displayName = userName.ifBlank { "Boss" }
         // 1. Short peaceful farewell
-        val farewellText = "Good night, $userName! Main standby mode me ja rahi hoon taaki aapki phone battery save ho sake. Sound sleep lijiye! 🌙✨"
+        val farewellText = "Good night, $displayName! ARC standby mode me ja raha hai taaki phone battery save ho sake. Sound sleep lijiye!"
 
-        // 2. Gracefully pause background always-listening service to save overnight battery
+        // 2. Gracefully pause background always-listening service to save battery
         try {
             AriaBackgroundWakeService.stop(context)
         } catch (e: Exception) {
