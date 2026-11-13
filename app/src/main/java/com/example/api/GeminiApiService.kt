@@ -1,6 +1,7 @@
 package com.example.api
 
 import com.example.BuildConfig
+import com.example.assistant.DeviceClockHelper
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.OkHttpClient
@@ -66,10 +67,11 @@ object GeminiClient {
         if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
             return "ARC AI mode active: I can help answer questions, calculate math, check weather, set reminders, and explain Python code!"
         }
+        val clockInfo = DeviceClockHelper.getCurrentDeviceClockInfo(logDebug = false, source = "GeminiTextAI")
         val request = GeminiRequest(
             contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = prompt)))),
             systemInstruction = GeminiContent(
-                parts = listOf(GeminiPart(text = "You are ARC (Autonomous Reactive Core), a JARVIS-inspired voice assistant. Your name is ARC. Keep answers concise, helpful, and friendly (2-3 sentences max unless explaining code).")))
+                parts = listOf(GeminiPart(text = "You are ARC (Autonomous Reactive Core), a JARVIS-inspired voice assistant. Your name is ARC. Current device local time: ${clockInfo.formattedTime}, ${clockInfo.formattedDate} (${clockInfo.timeZoneId}). Keep answers concise, helpful, and friendly (2-3 sentences max unless explaining code).")))
         )
         return try {
             val res = service.generateContent(apiKey, request)

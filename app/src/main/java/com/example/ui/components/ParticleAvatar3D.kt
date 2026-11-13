@@ -4,6 +4,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -115,6 +116,7 @@ object CoreAvatarGenerator {
 fun ParticleAvatar3D(
     status: AssistantStatus,
     modifier: Modifier = Modifier,
+    micVolume: Float = 0f,
     disableAnimations: Boolean = false
 ) {
     val corePoints = remember { CoreAvatarGenerator.generateCorePoints() }
@@ -182,6 +184,14 @@ fun ParticleAvatar3D(
         label = "sphere_audio_pulse"
     )
 
+    val isListening = status == AssistantStatus.LISTENING
+    val targetMicVolume = if (isListening && !disableAnimations) micVolume.coerceIn(0f, 1f) else 0f
+    val smoothedMicVolume by animateFloatAsState(
+        targetValue = targetMicVolume,
+        animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing),
+        label = "mic_volume_smooth"
+    )
+
     // Fixed blue/cyan palette: state ONLY changes animation speed & glow intensity, never color.
     val isSleep = status == AssistantStatus.SLEEP
     val baseThemeColor = if (isSleep) Color(0xFF64748B) else ElectricCyan
@@ -206,7 +216,7 @@ fun ParticleAvatar3D(
 
             val statusAlphaBoost = when (status) {
                 AssistantStatus.SPEAKING -> 1.15f
-                AssistantStatus.LISTENING -> 1.10f
+                AssistantStatus.LISTENING -> 1.05f + smoothedMicVolume * 0.72f
                 AssistantStatus.PROCESSING -> 1.05f
                 AssistantStatus.SLEEP -> 0.42f
                 else -> 1.0f
@@ -215,12 +225,17 @@ fun ParticleAvatar3D(
             // -----------------------------------------------------------------
             // 1. OUTER SOFT-LIGHT DIFFUSION / BLUR BLOOM AROUND THE SPHERE
             // -----------------------------------------------------------------
-            val outerBloomRadius = (minDim * 0.495f) * (if (status == AssistantStatus.SPEAKING || status == AssistantStatus.LISTENING) 0.96f + (pulse - 0.92f) * 0.16f else 1f)
+            val outerBloomFactor = when (status) {
+                AssistantStatus.LISTENING -> 0.93f + (pulse - 0.92f) * 0.12f + smoothedMicVolume * 0.13f
+                AssistantStatus.SPEAKING -> 0.96f + (pulse - 0.92f) * 0.16f
+                else -> 1f
+            }
+            val outerBloomRadius = (minDim * 0.495f) * outerBloomFactor
             drawCircle(
                 brush = Brush.radialGradient(
-                    0.00f to baseThemeColor.copy(alpha = (0.34f * statusAlphaBoost).coerceIn(0.08f, 0.48f)),
-                    0.48f to baseThemeColor.copy(alpha = (0.20f * statusAlphaBoost).coerceIn(0.04f, 0.30f)),
-                    0.74f to outerDiffusionColor.copy(alpha = (0.10f * statusAlphaBoost).coerceIn(0.02f, 0.16f)),
+                    0.00f to baseThemeColor.copy(alpha = (0.34f * statusAlphaBoost).coerceIn(0.08f, 0.72f)),
+                    0.48f to baseThemeColor.copy(alpha = (0.20f * statusAlphaBoost).coerceIn(0.04f, 0.46f)),
+                    0.74f to outerDiffusionColor.copy(alpha = (0.10f * statusAlphaBoost).coerceIn(0.02f, 0.25f)),
                     1.00f to Color.Transparent,
                     center = Offset(centerX, centerY),
                     radius = outerBloomRadius
@@ -230,12 +245,12 @@ fun ParticleAvatar3D(
             )
 
             // Soft inner white-to-accent core illumination emitting light from the sphere center
-            val coreGlowRadius = sphereRadius * (0.68f * (0.95f + (pulse - 0.92f) * 0.25f))
+            val coreGlowRadius = sphereRadius * (0.68f * (0.95f + (pulse - 0.92f) * 0.25f + smoothedMicVolume * 0.26f))
             drawCircle(
                 brush = Brush.radialGradient(
-                    0.00f to if (isSleep) Color(0xFF94A3B8).copy(alpha = 0.28f) else Color.White.copy(alpha = 0.85f),
-                    0.28f to if (isSleep) Color(0xFF64748B).copy(alpha = 0.18f) else Color(0xFFB8F8FF).copy(alpha = 0.56f),
-                    0.62f to baseThemeColor.copy(alpha = if (isSleep) 0.08f else 0.26f),
+                    0.00f to if (isSleep) Color(0xFF94A3B8).copy(alpha = 0.28f) else Color.White.copy(alpha = (0.85f + smoothedMicVolume * 0.15f).coerceAtMost(1f)),
+                    0.28f to if (isSleep) Color(0xFF64748B).copy(alpha = 0.18f) else Color(0xFFB8F8FF).copy(alpha = (0.56f + smoothedMicVolume * 0.30f).coerceAtMost(0.92f)),
+                    0.62f to baseThemeColor.copy(alpha = if (isSleep) 0.08f else (0.26f + smoothedMicVolume * 0.28f).coerceAtMost(0.62f)),
                     1.00f to Color.Transparent,
                     center = Offset(centerX, centerY),
                     radius = coreGlowRadius
@@ -245,12 +260,19 @@ fun ParticleAvatar3D(
             )
 
             // Subtle energy ripple ring only when actively speaking or listening
-            if (status == AssistantStatus.SPEAKING || status == AssistantStatus.LISTENING) {
+            if (status == AssistantStatus.SPEAKING || isListening) {
+                val rippleAlpha = if (isListening) {
+                    (0.18f + smoothedMicVolume * 0.56f + (pulse - 0.92f) * 0.18f).coerceIn(0.10f, 0.78f)
+                } else {
+                    (0.28f * (pulse - 0.72f)).coerceIn(0.06f, 0.36f)
+                }
+                val rippleRadius = sphereRadius * (1.03f + (pulse - 0.92f) * 0.38f + smoothedMicVolume * 0.16f)
+                val rippleStroke = (1.1f + smoothedMicVolume * 1.4f) * density
                 drawCircle(
-                    color = baseThemeColor.copy(alpha = (0.28f * (pulse - 0.72f)).coerceIn(0.06f, 0.36f)),
-                    radius = sphereRadius * (1.03f + (pulse - 0.92f) * 0.45f),
+                    color = baseThemeColor.copy(alpha = rippleAlpha),
+                    radius = rippleRadius,
                     center = Offset(centerX, centerY),
-                    style = Stroke(width = 1.1f * density)
+                    style = Stroke(width = rippleStroke)
                 )
             }
 
@@ -309,7 +331,7 @@ fun ParticleAvatar3D(
 
                 // Gentle radial shimmer keeps exact spherical shape (never scatters dots outward)
                 val radialWave = if (!disableAnimations) {
-                    1f + sin(shimmerCycle * 1.6f + p.shimmerPhase) * 0.018f + (pulse - 1f) * 0.08f
+                    1f + sin(shimmerCycle * 1.6f + p.shimmerPhase) * 0.018f + (pulse - 1f) * 0.08f + smoothedMicVolume * 0.08f
                 } else {
                     1f
                 }
@@ -341,31 +363,32 @@ fun ParticleAvatar3D(
             }
 
             // Fine, uniform particle diameters (smooth volumetric dust texture, no chunky dots)
+            val particleBrightnessBoost = smoothedMicVolume * 0.22f
             drawPoints(
                 points = outerRimPoints,
                 pointMode = PointMode.Points,
-                color = HologramBlue.copy(alpha = if (isSleep) 0.28f else 0.48f),
+                color = HologramBlue.copy(alpha = if (isSleep) 0.28f else (0.48f + particleBrightnessBoost).coerceAtMost(0.85f)),
                 strokeWidth = 1.15f * density,
                 cap = StrokeCap.Round
             )
             drawPoints(
                 points = midCyanPoints,
                 pointMode = PointMode.Points,
-                color = baseThemeColor.copy(alpha = if (isSleep) 0.38f else 0.72f),
+                color = baseThemeColor.copy(alpha = if (isSleep) 0.38f else (0.72f + particleBrightnessBoost).coerceAtMost(0.95f)),
                 strokeWidth = 1.35f * density,
                 cap = StrokeCap.Round
             )
             drawPoints(
                 points = innerBrightPoints,
                 pointMode = PointMode.Points,
-                color = if (isSleep) Color(0xFF94A3B8).copy(alpha = 0.45f) else Color(0xFFA5F3FC).copy(alpha = 0.88f),
+                color = if (isSleep) Color(0xFF94A3B8).copy(alpha = 0.45f) else Color(0xFFA5F3FC).copy(alpha = (0.88f + particleBrightnessBoost * 0.5f).coerceAtMost(1f)),
                 strokeWidth = 1.45f * density,
                 cap = StrokeCap.Round
             )
             drawPoints(
                 points = coreWhitePoints,
                 pointMode = PointMode.Points,
-                color = if (isSleep) Color(0xFFCBD5E1).copy(alpha = 0.52f) else Color.White.copy(alpha = 0.96f),
+                color = if (isSleep) Color(0xFFCBD5E1).copy(alpha = 0.52f) else Color.White.copy(alpha = (0.96f + particleBrightnessBoost * 0.2f).coerceAtMost(1f)),
                 strokeWidth = 1.55f * density,
                 cap = StrokeCap.Round
             )

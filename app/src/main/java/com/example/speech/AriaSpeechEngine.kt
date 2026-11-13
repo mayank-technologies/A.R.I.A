@@ -86,6 +86,9 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     private val _isListening = MutableStateFlow(false)
     val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
 
+    private val _micVolumeLevel = MutableStateFlow(0f)
+    val micVolumeLevel: StateFlow<Float> = _micVolumeLevel.asStateFlow()
+
     private val _isWakeWordModeEnabled = MutableStateFlow(false)
     val isWakeWordModeEnabled: StateFlow<Boolean> = _isWakeWordModeEnabled.asStateFlow()
 
@@ -478,9 +481,11 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
         }
         try {
             _isListening.value = true
+            _micVolumeLevel.value = 0f
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
             _isListening.value = false
+            _micVolumeLevel.value = 0f
             Log.e("AriaSpeechEngine", "Error starting wake word listener: ${e.message}")
             scheduleWakeWordLoop(2000L)
         }
@@ -492,17 +497,23 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
             speechRecognizer?.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     _isListening.value = true
+                    _micVolumeLevel.value = 0f
                 }
 
                 override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onRmsChanged(rmsdB: Float) {
+                    val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+                    _micVolumeLevel.value = (_micVolumeLevel.value * 0.3f + normalized * 0.7f).coerceIn(0f, 1f)
+                }
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {
                     _isListening.value = false
+                    _micVolumeLevel.value = 0f
                 }
 
                 override fun onError(error: Int) {
                     _isListening.value = false
+                    _micVolumeLevel.value = 0f
                     if (_isWakeWordModeEnabled.value && !_isSpeaking.value) {
                         scheduleWakeWordLoop(1200L)
                     }
@@ -510,6 +521,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
 
                 override fun onResults(results: Bundle?) {
                     _isListening.value = false
+                    _micVolumeLevel.value = 0f
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     if (!matches.isNullOrEmpty()) {
                         val text = matches[0]
@@ -530,6 +542,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     fun startListening(onResult: (String) -> Unit) {
         this.onSpeechResultListener = onResult
         _isListening.value = true
+        _micVolumeLevel.value = 0f
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
@@ -539,6 +552,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
             _isListening.value = false
+            _micVolumeLevel.value = 0f
             Log.e("AriaSpeechEngine", "Error starting speech recognition: ${e.message}")
         }
     }
@@ -547,11 +561,13 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
         wakeWordJob?.cancel()
         speechRecognizer?.stopListening()
         _isListening.value = false
+        _micVolumeLevel.value = 0f
     }
 
     fun destroy() {
         wakeWordJob?.cancel()
         stopSpeaking()
+        _micVolumeLevel.value = 0f
         nativeTts?.shutdown()
         speechRecognizer?.destroy()
     }

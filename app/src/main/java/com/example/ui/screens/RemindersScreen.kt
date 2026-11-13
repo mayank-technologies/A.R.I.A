@@ -171,7 +171,10 @@ fun RemindersScreen(
                         onClick = {
                             if (newReminderTitle.isNotBlank()) {
                                 val timeToSave = if (newReminderTime.isBlank()) {
-                                    SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+                                    com.example.assistant.DeviceClockHelper.getCurrentDeviceClockInfo(
+                                        logDebug = false,
+                                        source = "RemindersDefaultTime"
+                                    ).formattedTime
                                 } else newReminderTime
 
                                 viewModel.addReminder(newReminderTitle, timeToSave)

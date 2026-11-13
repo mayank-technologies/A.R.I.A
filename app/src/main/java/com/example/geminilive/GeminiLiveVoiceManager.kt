@@ -9,6 +9,7 @@ import android.media.MediaRecorder
 import android.util.Base64
 import android.util.Log
 import com.example.BuildConfig
+import com.example.assistant.DeviceClockHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -83,6 +84,9 @@ class GeminiLiveVoiceManager(private val context: Context) {
     private val _detectedLanguage = MutableStateFlow("Auto (Bilingual)")
     val detectedLanguage: StateFlow<String> = _detectedLanguage.asStateFlow()
 
+    private val _micVolumeLevel = MutableStateFlow(0f)
+    val micVolumeLevel: StateFlow<Float> = _micVolumeLevel.asStateFlow()
+
     private val okHttpClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS) // Indefinite for real-time WebSocket
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -141,6 +145,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d(TAG, "Gemini Live WebSocket closed ($code: $reason)")
                 _sessionState.value = GeminiLiveSessionState.DISCONNECTED
+                _micVolumeLevel.value = 0f
             }
         })
     }
@@ -173,11 +178,17 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 put("generationConfig", generationConfig)
 
                 // Multi-Language & Verbal Confirmation System Instruction
+                val clockSnapshot = DeviceClockHelper.getCurrentDeviceClockInfo(
+                    context = context,
+                    logDebug = true,
+                    source = "GeminiLiveHandshake"
+                )
                 val systemInstruction = JSONObject().apply {
                     val parts = JSONArray().apply {
                         put(JSONObject().apply {
                             put("text", """
                                 You are ARC (Autonomous Reactive Core), a high-tech JARVIS-grade personal voice assistant.
+                                Session start device local time: ${clockSnapshot.formattedTime}, ${clockSnapshot.formattedDate} (${clockSnapshot.timeZoneId}).
                                 
                                 CRITICAL MULTI-LANGUAGE INSTRUCTIONS:
                                 1. Automatically detect the user's spoken language: Hindi, English, Hinglish, Marathi, Gujarati, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi, or Urdu.
@@ -186,11 +197,12 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                 4. Keep spoken responses concise, articulate, and respectful (2-3 sentences max).
                                 
                                 FUNCTION-CALLING & CALL CONFIRMATION RULES:
-                                1. Use the provided tools (openWhatsApp, openApp, openUrl, makeCall, callContact) whenever user expresses an action intent.
-                                2. NEVER execute arbitrary code. ONLY trigger the declared tools.
-                                3. When calling someone: Verbally acknowledge immediately (e.g. "Calling Mom, Boss", "Rahul ko call laga rahi hu") before or during the tool call.
-                                4. If a tool fails or reports an error, state the TRUTH to the user politely. NEVER pretend an action succeeded when it failed.
-                                5. If contact matching yields multiple possibilities, explicitly ask user for clarification (e.g., 'kaunsa Rahul - Sharma ya Verma?').
+                                1. Use the provided tools (openWhatsApp, openApp, openUrl, makeCall, callContact, getCurrentDateTime) whenever user expresses an action intent or asks the current time/date.
+                                2. ALWAYS call getCurrentDateTime before stating the current time or date so you never guess or give a stale/wrong time.
+                                3. NEVER execute arbitrary code. ONLY trigger the declared tools.
+                                4. When calling someone: Verbally acknowledge immediately (e.g. "Calling Mom, Boss", "Rahul ko call laga rahi hu") before or during the tool call.
+                                5. If a tool fails or reports an error, state the TRUTH to the user politely. NEVER pretend an action succeeded when it failed.
+                                6. If contact matching yields multiple possibilities, explicitly ask user for clarification (e.g., 'kaunsa Rahul - Sharma ya Verma?').
                             """.trimIndent())
                         })
                     }
@@ -240,6 +252,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                     val b64 = inlineData.optString("data", "")
                                     if (b64.isNotBlank()) {
                                         _sessionState.value = GeminiLiveSessionState.SPEAKING
+                                        _micVolumeLevel.value = 0f
                                         val pcmBytes = Base64.decode(b64, Base64.DEFAULT)
                                         playRawPcm(pcmBytes)
                                     }
@@ -357,6 +370,26 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 while (isActive && _sessionState.value != GeminiLiveSessionState.DISCONNECTED) {
                     val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                     if (read > 0) {
+                        if (_sessionState.value == GeminiLiveSessionState.LISTENING) {
+                            var sumSquares = 0.0
+                            var sampleCount = 0
+                            var idx = 0
+                            while (idx < read - 1) {
+                                val sample = ((buffer[idx].toInt() and 0xFF) or (buffer[idx + 1].toInt() shl 8)).toShort()
+                                val s = sample.toDouble()
+                                sumSquares += s * s
+                                sampleCount++
+                                idx += 2
+                            }
+                            if (sampleCount > 0) {
+                                val rms = kotlin.math.sqrt(sumSquares / sampleCount)
+                                val normalized = (rms / 6500.0).toFloat().coerceIn(0f, 1f)
+                                _micVolumeLevel.value = (_micVolumeLevel.value * 0.35f + normalized * 0.65f).coerceIn(0f, 1f)
+                            }
+                        } else {
+                            _micVolumeLevel.value = 0f
+                        }
+
                         val base64Chunk = Base64.encodeToString(buffer, 0, read, Base64.NO_WRAP)
                         val realtimeInput = JSONObject().apply {
                             val inputObj = JSONObject().apply {
@@ -442,6 +475,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping Live Session: ${e.message}")
         } finally {
+            _micVolumeLevel.value = 0f
             _sessionState.value = GeminiLiveSessionState.DISCONNECTED
         }
     }

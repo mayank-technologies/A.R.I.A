@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import com.example.assistant.ContactCallHandler
 import com.example.assistant.ContactCallResult
+import com.example.assistant.DeviceClockHelper
 import com.example.assistant.SmartAppOpener
 import com.example.assistant.WhatsAppActionResult
 import com.example.assistant.WhatsAppContactResolver
@@ -127,12 +128,24 @@ object GeminiLiveFunctionRegistry {
             put("parameters", params)
         }
 
+        // 6. getCurrentDateTime
+        val getCurrentDateTime = JSONObject().apply {
+            put("name", "getCurrentDateTime")
+            put("description", "Returns the device's exact current local date, time, and timezone. ALWAYS call this when the user asks what time or date it is.")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            }
+            put("parameters", params)
+        }
+
         val functionDeclarations = JSONArray().apply {
             put(openWhatsApp)
             put(openApp)
             put(openUrl)
             put(makeCall)
             put(callContact)
+            put(getCurrentDateTime)
         }
 
         val toolWrapper = JSONObject().apply {
@@ -163,6 +176,7 @@ object GeminiLiveFunctionRegistry {
             "openUrl" -> executeOpenUrl(context, callId, args)
             "makeCall" -> executeMakeCall(context, callId, args)
             "callContact" -> executeCallContact(context, callId, args)
+            "getCurrentDateTime" -> executeGetCurrentDateTime(context, callId)
             else -> {
                 Log.w(TAG, "Unknown tool call: $functionName")
                 ToolExecutionOutput(
@@ -386,5 +400,26 @@ object GeminiLiveFunctionRegistry {
                 )
             }
         }
+    }
+
+    private fun executeGetCurrentDateTime(context: Context, callId: String): ToolExecutionOutput {
+        val clockInfo = DeviceClockHelper.getCurrentDeviceClockInfo(
+            context = context,
+            respect24HourSetting = false,
+            logDebug = true,
+            source = "GeminiLiveTimeTool"
+        )
+        return ToolExecutionOutput(
+            callId = callId,
+            toolName = "getCurrentDateTime",
+            success = true,
+            responseData = JSONObject().apply {
+                put("formattedTime", clockInfo.formattedTime)
+                put("formattedDate", clockInfo.formattedDate)
+                put("timeZoneId", clockInfo.timeZoneId)
+                put("isoLocal", clockInfo.isoLocalTimestamp)
+            },
+            verbalConfirmation = "Boss, abhi ${clockInfo.formattedTime} hua hai (${clockInfo.formattedDate})."
+        )
     }
 }

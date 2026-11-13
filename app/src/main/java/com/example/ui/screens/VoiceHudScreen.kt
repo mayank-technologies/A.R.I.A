@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -72,6 +76,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -97,6 +102,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.assistant.DeviceClockHelper
 import com.example.assistant.battery.AriaBatterySaverManager
 import com.example.geminilive.GeminiLiveSessionState
 import com.example.ui.AriaViewModel
@@ -119,23 +129,100 @@ import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.WarningAmber
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
+/**
+ * Live device clock string for the HUD Time Pill:
+ * 1. Uses DeviceClockHelper so SimpleDateFormat & TimeZone are NEVER cached across ticks.
+ * 2. Refreshes immediately on ACTION_TIME_TICK, ACTION_TIME_CHANGED, ACTION_TIMEZONE_CHANGED, and ON_RESUME.
+ * 3. Aligns coroutine fallback ticker to exact minute boundaries (:00s) instead of drifting 15s delays.
+ */
 @Composable
 fun rememberCompactTimeString(): String {
-    var timeStr by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) {
-        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
-        while (true) {
-            timeStr = sdf.format(Date())
-            kotlinx.coroutines.delay(15000)
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    var timeStr by remember {
+        mutableStateOf(
+            DeviceClockHelper.getCurrentDeviceClockInfo(
+                context = context,
+                respect24HourSetting = false,
+                logDebug = true,
+                source = "HudTimePillInit"
+            ).formattedTime
+        )
+    }
+
+    // Listen to Android system time/timezone broadcasts + lifecycle resume
+    DisposableEffect(context, lifecycleOwner) {
+        val refreshNow: (String) -> Unit = { triggerSource ->
+            val snapshot = DeviceClockHelper.getCurrentDeviceClockInfo(
+                context = context,
+                respect24HourSetting = false,
+                logDebug = true,
+                source = triggerSource
+            )
+            timeStr = snapshot.formattedTime
+        }
+
+        val timeReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    Intent.ACTION_TIMEZONE_CHANGED -> {
+                        DeviceClockHelper.onTimezoneChanged(intent.getStringExtra("time-zone"))
+                        refreshNow("BroadcastTimezoneChanged")
+                    }
+                    Intent.ACTION_TIME_CHANGED -> refreshNow("BroadcastTimeChanged")
+                    Intent.ACTION_TIME_TICK -> refreshNow("BroadcastTimeTick")
+                }
+            }
+        }
+
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_TIME_TICK)
+            addAction(Intent.ACTION_TIME_CHANGED)
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+        }
+        ContextCompat.registerReceiver(
+            context,
+            timeReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshNow("LifecycleOnResume")
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+
+        onDispose {
+            try {
+                context.unregisterReceiver(timeReceiver)
+            } catch (_: IllegalArgumentException) {
+            }
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
         }
     }
-    return timeStr.ifEmpty {
-        SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+
+    // Minute-aligned fallback ticker in case broadcasts are throttled
+    LaunchedEffect(context) {
+        while (true) {
+            kotlinx.coroutines.delay(DeviceClockHelper.millisUntilNextMinuteTick())
+            val snapshot = DeviceClockHelper.getCurrentDeviceClockInfo(
+                context = context,
+                respect24HourSetting = false,
+                logDebug = false,
+                source = "MinuteAlignedTicker"
+            )
+            if (timeStr != snapshot.formattedTime) {
+                timeStr = snapshot.formattedTime
+                DeviceClockHelper.logClockSnapshot(snapshot, source = "MinuteAlignedTicker")
+            }
+        }
     }
+
+    return timeStr
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -162,6 +249,7 @@ fun VoiceHudScreen(
     val isWakeWordModeEnabled by viewModel.isWakeWordModeEnabled.collectAsState()
     val isGeminiLiveMode by viewModel.isGeminiLiveMode.collectAsState()
     val geminiLiveState by viewModel.geminiLiveManager.sessionState.collectAsState()
+    val micVolumeLevel by viewModel.micVolumeLevel.collectAsState()
 
     val isBatterySaverActive by AriaBatterySaverManager.isBatterySaverActive.collectAsState()
     val batteryLevel by AriaBatterySaverManager.batteryLevel.collectAsState()
@@ -323,7 +411,12 @@ fun VoiceHudScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    val effectiveStatus = if (isArcPoweredOn) assistantStatus else AssistantStatus.SLEEP
+                    val effectiveStatus = when {
+                        !isArcPoweredOn || assistantStatus == AssistantStatus.SLEEP -> AssistantStatus.SLEEP
+                        geminiLiveState == GeminiLiveSessionState.SPEAKING -> AssistantStatus.SPEAKING
+                        geminiLiveState == GeminiLiveSessionState.LISTENING -> AssistantStatus.LISTENING
+                        else -> assistantStatus
+                    }
 
                     // Transparent unclipped glow frame for the dense CORE particle sphere
                     Box(
@@ -335,6 +428,7 @@ fun VoiceHudScreen(
                     ) {
                         ParticleAvatar3D(
                             status = effectiveStatus,
+                            micVolume = micVolumeLevel,
                             disableAnimations = isBatterySaverActive || !isArcPoweredOn,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -353,18 +447,18 @@ fun VoiceHudScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     // Centered Status Subtitle ("TAP TO START" when OFF, active state when ON)
-                    val subtitleText = when {
-                        !isArcPoweredOn || assistantStatus == AssistantStatus.SLEEP -> "TAP TO START"
-                        assistantStatus == AssistantStatus.LISTENING -> "LISTENING..."
-                        assistantStatus == AssistantStatus.PROCESSING -> "THINKING..."
-                        assistantStatus == AssistantStatus.SPEAKING -> "SPEAKING..."
+                    val subtitleText = when (effectiveStatus) {
+                        AssistantStatus.SLEEP -> "TAP TO START"
+                        AssistantStatus.LISTENING -> "LISTENING..."
+                        AssistantStatus.PROCESSING -> "THINKING..."
+                        AssistantStatus.SPEAKING -> "SPEAKING..."
                         else -> "ARC VOICE ASSISTANT"
                     }
-                    val subtitleColor = when {
-                        !isArcPoweredOn || assistantStatus == AssistantStatus.SLEEP -> TextMuted
-                        assistantStatus == AssistantStatus.LISTENING -> ElectricCyan
-                        assistantStatus == AssistantStatus.PROCESSING -> HologramBlue
-                        assistantStatus == AssistantStatus.SPEAKING -> ElectricCyan
+                    val subtitleColor = when (effectiveStatus) {
+                        AssistantStatus.SLEEP -> TextMuted
+                        AssistantStatus.LISTENING -> ElectricCyan
+                        AssistantStatus.PROCESSING -> HologramBlue
+                        AssistantStatus.SPEAKING -> ElectricCyan
                         else -> TextSecondary
                     }
 
@@ -376,7 +470,7 @@ fun VoiceHudScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontFamily = FontFamily.Monospace,
                             letterSpacing = 2.6.sp,
-                            shadow = if (isArcPoweredOn && assistantStatus != AssistantStatus.SLEEP) {
+                            shadow = if (effectiveStatus != AssistantStatus.SLEEP) {
                                 Shadow(
                                     color = subtitleColor.copy(alpha = 0.45f),
                                     offset = Offset(0f, 0f),
@@ -390,10 +484,7 @@ fun VoiceHudScreen(
 
                     // Subtle audio waveform indicator only while powered ON and listening
                     ListeningPulseIndicator(
-                        isListening = isArcPoweredOn && (
-                            assistantStatus == AssistantStatus.LISTENING ||
-                                geminiLiveState == GeminiLiveSessionState.LISTENING
-                            ),
+                        isListening = effectiveStatus == AssistantStatus.LISTENING,
                         disableAnimations = isBatterySaverActive,
                         modifier = Modifier.padding(top = 4.dp)
                     )
@@ -441,8 +532,14 @@ fun VoiceHudScreen(
                 // -------------------------------------------------------------
                 // 4. BOTTOM ICON ROW: Screen Vision | Prominent Mic | Chat Input
                 // -------------------------------------------------------------
+                val bottomStatus = when {
+                    !isArcPoweredOn || assistantStatus == AssistantStatus.SLEEP -> AssistantStatus.SLEEP
+                    geminiLiveState == GeminiLiveSessionState.SPEAKING -> AssistantStatus.SPEAKING
+                    geminiLiveState == GeminiLiveSessionState.LISTENING -> AssistantStatus.LISTENING
+                    else -> assistantStatus
+                }
                 BottomHudActionRow(
-                    assistantStatus = assistantStatus,
+                    assistantStatus = bottomStatus,
                     disableAnimations = isBatterySaverActive,
                     onScreenVisionClick = { viewModel.submitTextCommand("read screen") },
                     onMicClick = { viewModel.activateArcWithGreeting() },

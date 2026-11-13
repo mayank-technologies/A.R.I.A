@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -82,6 +83,13 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     val isSpeaking: StateFlow<Boolean> = speechEngine.isSpeaking
     val isSynthesizing: StateFlow<Boolean> = speechEngine.isSynthesizing
     val isWakeWordModeEnabled: StateFlow<Boolean> = speechEngine.isWakeWordModeEnabled
+
+    val micVolumeLevel: StateFlow<Float> = combine(
+        speechEngine.micVolumeLevel,
+        geminiLiveManager.micVolumeLevel
+    ) { speechVol, liveVol ->
+        maxOf(speechVol, liveVol)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
     fun setElevenLabsApiKey(key: String) {
         speechEngine.setApiKey(key)

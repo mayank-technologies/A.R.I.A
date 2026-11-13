@@ -394,18 +394,27 @@ class AriaCommandProcessor(
         }
 
         // 1. Time & Date commands
-        if (queryLower.contains("time") || queryLower.contains("samay") || queryLower.contains("waqt") || queryLower.contains("kitne baje")) {
-            val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
-            val currentTime = timeFormat.format(Date())
-            val reply = "Boss, abhi $currentTime hua hai."
+        if (queryLower.contains("time") || queryLower.contains("samay") || queryLower.contains("waqt") ||
+            queryLower.contains("kitne baje") || queryLower.contains("kitna baja") || queryLower.contains("kya baje")
+        ) {
+            val clockInfo = DeviceClockHelper.getCurrentDeviceClockInfo(
+                context = context,
+                respect24HourSetting = false,
+                logDebug = true,
+                source = "VoiceTimeCommand"
+            )
+            val reply = "Boss, abhi ${clockInfo.formattedTime} hua hai."
             saveHistory(userQuery, reply, "TIME")
             return@withContext AriaCommandResult.TextResponse(reply, "TIME")
         }
 
         if (queryLower.contains("date") || queryLower.contains("tarikh") || queryLower.contains("taarikh") || queryLower.contains("aaj kaun sa din")) {
-            val dateFormat = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault())
-            val currentDate = dateFormat.format(Date())
-            val reply = "Aaj ki date hai: $currentDate."
+            val clockInfo = DeviceClockHelper.getCurrentDeviceClockInfo(
+                context = context,
+                logDebug = true,
+                source = "VoiceDateCommand"
+            )
+            val reply = "Aaj ki date hai: ${clockInfo.formattedDate}."
             saveHistory(userQuery, reply, "DATE")
             return@withContext AriaCommandResult.TextResponse(reply, "DATE")
         }
@@ -704,7 +713,11 @@ class AriaCommandProcessor(
     suspend fun generateBriefingSummary(userName: String): String = withContext(Dispatchers.IO) {
         val displayName = userName.ifBlank { "Boss" }
 
-        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val hour = DeviceClockHelper.getCurrentDeviceClockInfo(
+            context = context,
+            logDebug = true,
+            source = "AutoBriefingGreeting"
+        ).hourOfDay
         val timeGreeting = when (hour) {
             in 4..11 -> "Good morning"
             in 12..16 -> "Good afternoon"
