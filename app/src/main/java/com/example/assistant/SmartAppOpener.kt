@@ -40,6 +40,13 @@ object SmartAppOpener {
 
     // Dictionary mapping app/site keywords to AppTargetInfo
     val appDictionary = mapOf(
+        "flipkart minutes" to AppTargetInfo(
+            appName = "Flipkart Minutes",
+            packageName = "com.flipkart.android",
+            fallbackUrl = "https://www.flipkart.com",
+            searchUrlTemplate = "https://www.flipkart.com/search?q=%s",
+            deepLinkSearchUri = "flipkart://search?q=%s"
+        ),
         "flipkart" to AppTargetInfo(
             appName = "Flipkart",
             packageName = "com.flipkart.android",
@@ -47,12 +54,33 @@ object SmartAppOpener {
             searchUrlTemplate = "https://www.flipkart.com/search?q=%s",
             deepLinkSearchUri = "flipkart://search?q=%s"
         ),
+        "blinkit" to AppTargetInfo(
+            appName = "Blinkit",
+            packageName = "com.grofers.customerapp",
+            fallbackUrl = "https://blinkit.com",
+            searchUrlTemplate = "https://blinkit.com/s/?q=%s",
+            deepLinkSearchUri = "blinkit://search?q=%s"
+        ),
+        "zepto" to AppTargetInfo(
+            appName = "Zepto",
+            packageName = "com.zeptoconsumerapp",
+            fallbackUrl = "https://www.zeptonow.com",
+            searchUrlTemplate = "https://www.zeptonow.com/search?query=%s",
+            deepLinkSearchUri = "zepto://search?query=%s"
+        ),
+        "instamart" to AppTargetInfo(
+            appName = "Swiggy Instamart",
+            packageName = "in.swiggy.android",
+            fallbackUrl = "https://www.swiggy.com/instamart",
+            searchUrlTemplate = "https://www.swiggy.com/instamart/search?query=%s",
+            deepLinkSearchUri = "swiggy://store-search?query=%s"
+        ),
         "amazon" to AppTargetInfo(
             appName = "Amazon",
             packageName = "com.amazon.mShop.android.shopping",
             fallbackUrl = "https://www.amazon.in",
             searchUrlTemplate = "https://www.amazon.in/s?k=%s",
-            deepLinkSearchUri = "https://www.amazon.in/s?k=%s"
+            deepLinkSearchUri = "com.amazon.mobile.shopping.web://amazon.in/s?k=%s"
         ),
         "youtube" to AppTargetInfo(
             appName = "YouTube",
@@ -78,7 +106,8 @@ object SmartAppOpener {
             appName = "Swiggy",
             packageName = "in.swiggy.android",
             fallbackUrl = "https://www.swiggy.com",
-            searchUrlTemplate = "https://www.swiggy.com/search?query=%s"
+            searchUrlTemplate = "https://www.swiggy.com/search?query=%s",
+            deepLinkSearchUri = "swiggy://explore?query=%s"
         ),
         "whatsapp" to AppTargetInfo(
             appName = "WhatsApp",

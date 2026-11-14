@@ -7,6 +7,14 @@ import android.util.Log
 import com.example.assistant.ContactCallHandler
 import com.example.assistant.ContactCallResult
 import com.example.assistant.DeviceClockHelper
+import com.example.assistant.GoogleMapsVoiceHandler
+import com.example.assistant.MapsActionResult
+import com.example.assistant.RideApp
+import com.example.assistant.RideBookingAssistHandler
+import com.example.assistant.RideBookingResult
+import com.example.assistant.RideVehicleOption
+import com.example.assistant.ShoppingAssistHandler
+import com.example.assistant.ShoppingAssistResult
 import com.example.assistant.SmartAppOpener
 import com.example.assistant.WhatsAppActionResult
 import com.example.assistant.WhatsAppContactResolver
@@ -15,6 +23,8 @@ import com.example.assistant.hardware.AndroidHardwareController
 import com.example.assistant.hardware.HardwareActionResult
 import com.example.assistant.security.AntiTheftSirenManager
 import com.example.assistant.whatsapp.WhatsAppAutomationManager
+import com.example.claude.ClaudeReasoningEngine
+import com.example.claude.ClaudeReasoningResult
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -197,6 +207,71 @@ object GeminiLiveFunctionRegistry {
             put("parameters", params)
         }
 
+        // 11. consultClaudeBrain (Anthropic Claude reasoning & tool-decision brain)
+        val consultClaudeBrain = JSONObject().apply {
+            put("name", "consultClaudeBrain")
+            put("description", "Delegates complex command understanding, multi-step reasoning, contact/app selection, or general Q&A to ARC's Claude reasoning brain. Always call this first for actionable commands or Q&A when available.")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                val props = JSONObject().apply {
+                    propsPut("userQuery", "STRING", "Exact transcribed user request or question in the user's language.")
+                }
+                put("properties", props)
+                put("required", JSONArray().apply { put("userQuery") })
+            }
+            put("parameters", params)
+        }
+
+        // 12. openGoogleMapsRoute
+        val openGoogleMapsRoute = JSONObject().apply {
+            put("name", "openGoogleMapsRoute")
+            put("description", "Opens driving route directions between origin and destination in Google Maps or browser (e.g., 'Delhi se Mathura ka route dikhao').")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                val props = JSONObject().apply {
+                    propsPut("origin", "STRING", "Starting city/address (optional; omit or empty for current GPS location).")
+                    propsPut("destination", "STRING", "Destination city/address (e.g., 'Mathura').")
+                    propsPut("travelMode", "STRING", "Travel mode: 'driving', 'walking', 'bicycling', or 'transit'. Defaults to 'driving'.")
+                }
+                put("properties", props)
+                put("required", JSONArray().apply { put("destination") })
+            }
+            put("parameters", params)
+        }
+
+        // 13. assistRideBooking
+        val assistRideBooking = JSONObject().apply {
+            put("name", "assistRideBooking")
+            put("description", "Assists booking a ride on Uber, Ola, or Rapido. If vehicleType is missing, asks user 'Bike, car 4-seater, ya 6-seater?'. Opens app pre-filled; user MUST manually tap Book and pay.")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                val props = JSONObject().apply {
+                    propsPut("destination", "STRING", "Dropoff location or city (e.g., 'Mathura', 'Airport').")
+                    propsPut("vehicleType", "STRING", "One of: 'bike', 'car_4_seater', 'car_6_seater', 'auto'. Leave empty if user has not specified yet so ARC asks first.")
+                    propsPut("preferredApp", "STRING", "Optional app preference: 'uber', 'ola', or 'rapido'.")
+                }
+                put("properties", props)
+                put("required", JSONArray().apply { put("destination") })
+            }
+            put("parameters", params)
+        }
+
+        // 14. assistShoppingSearch
+        val assistShoppingSearch = JSONObject().apply {
+            put("name", "assistShoppingSearch")
+            put("description", "Opens shopping app (Flipkart, Flipkart Minutes, Blinkit, Zepto, Amazon, Instamart) and pre-searches a product. NEVER places orders or pays; user adds to cart and confirms payment.")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                val props = JSONObject().apply {
+                    propsPut("appName", "STRING", "Store name (e.g. 'Flipkart', 'Flipkart Minutes', 'Blinkit', 'Zepto', 'Amazon', 'Instamart').")
+                    propsPut("productQuery", "STRING", "Product search text (e.g. '500g sugar').")
+                }
+                put("properties", props)
+                put("required", JSONArray().apply { put("appName"); put("productQuery") })
+            }
+            put("parameters", params)
+        }
+
         val functionDeclarations = JSONArray().apply {
             put(openWhatsApp)
             put(openApp)
@@ -208,6 +283,10 @@ object GeminiLiveFunctionRegistry {
             put(toggleSecurityGuard)
             put(readWhatsAppNotifications)
             put(readScreenVision)
+            put(consultClaudeBrain)
+            put(openGoogleMapsRoute)
+            put(assistRideBooking)
+            put(assistShoppingSearch)
         }
 
         val toolWrapper = JSONObject().apply {
@@ -243,6 +322,10 @@ object GeminiLiveFunctionRegistry {
             "toggleSecurityGuard" -> executeToggleSecurityGuard(context, callId, args)
             "readWhatsAppNotifications" -> executeReadWhatsAppNotifications(context, callId)
             "readScreenVision" -> executeReadScreenVision(callId)
+            "consultClaudeBrain" -> executeConsultClaudeBrain(context, callId, args)
+            "openGoogleMapsRoute" -> executeOpenGoogleMapsRoute(context, callId, args)
+            "assistRideBooking" -> executeAssistRideBooking(context, callId, args)
+            "assistShoppingSearch" -> executeAssistShoppingSearch(context, callId, args)
             else -> {
                 Log.w(TAG, "Unknown tool call: $functionName")
                 ToolExecutionOutput(
@@ -605,5 +688,213 @@ object GeminiLiveFunctionRegistry {
             responseData = JSONObject().apply { put("screenText", text) },
             verbalConfirmation = text
         )
+    }
+
+    private fun executeConsultClaudeBrain(context: Context, callId: String, args: JSONObject): ToolExecutionOutput {
+        val userQuery = args.optString("userQuery", "").trim()
+        if (userQuery.isBlank()) {
+            return ToolExecutionOutput(
+                callId = callId,
+                toolName = "consultClaudeBrain",
+                success = false,
+                responseData = JSONObject().apply {
+                    put("useGeminiFallback", true)
+                    put("reason", "empty_query")
+                },
+                verbalConfirmation = ""
+            )
+        }
+
+        val result = runBlocking {
+            ClaudeReasoningEngine.reasonAndExecute(
+                context = context,
+                userTranscript = userQuery,
+                executeTools = true
+            )
+        }
+
+        return when (result) {
+            is ClaudeReasoningResult.Success -> {
+                val executedNames = JSONArray().apply {
+                    result.executedOutputs.forEach { put(it.toolName) }
+                }
+                ToolExecutionOutput(
+                    callId = callId,
+                    toolName = "consultClaudeBrain",
+                    success = true,
+                    responseData = JSONObject().apply {
+                        put("useGeminiFallback", false)
+                        put("spokenResponse", result.spokenResponse)
+                        put("executedTools", executedNames)
+                    },
+                    verbalConfirmation = result.spokenResponse
+                )
+            }
+            is ClaudeReasoningResult.FallbackRequired -> {
+                Log.w(TAG, "Claude brain unavailable (${result.reason}); returning Gemini Live fallback signal")
+                ToolExecutionOutput(
+                    callId = callId,
+                    toolName = "consultClaudeBrain",
+                    success = false,
+                    responseData = JSONObject().apply {
+                        put("useGeminiFallback", true)
+                        put("reason", result.reason)
+                    },
+                    verbalConfirmation = ""
+                )
+            }
+        }
+    }
+
+    private fun executeOpenGoogleMapsRoute(context: Context, callId: String, args: JSONObject): ToolExecutionOutput {
+        val origin = args.optString("origin", "").trim().takeIf { it.isNotBlank() }
+        val destination = args.optString("destination", "").trim()
+        val travelMode = args.optString("travelMode", "driving").ifBlank { "driving" }
+
+        if (destination.isBlank()) {
+            return ToolExecutionOutput(
+                callId = callId,
+                toolName = "openGoogleMapsRoute",
+                success = false,
+                responseData = JSONObject().apply { put("error", "missing_destination") },
+                verbalConfirmation = "Kahan ka route dikhana hai? Destination batayein, Boss."
+            )
+        }
+
+        val routeUrl = GoogleMapsVoiceHandler.buildGoogleMapsRouteUrl(origin, destination, travelMode)
+        val inNativeMaps = GoogleMapsVoiceHandler.launchGoogleMapsOrBrowser(context, routeUrl)
+        val msg = if (origin != null) {
+            "$origin se $destination ka route ${if (inNativeMaps) "Google Maps" else "browser"} me khol diya hai, Boss."
+        } else {
+            "$destination ka route ${if (inNativeMaps) "Google Maps" else "browser"} me khol diya hai, Boss."
+        }
+
+        return ToolExecutionOutput(
+            callId = callId,
+            toolName = "openGoogleMapsRoute",
+            success = true,
+            responseData = JSONObject().apply {
+                put("routeUrl", routeUrl)
+                put("openedInMaps", inNativeMaps)
+            },
+            verbalConfirmation = msg
+        )
+    }
+
+    private fun executeAssistRideBooking(context: Context, callId: String, args: JSONObject): ToolExecutionOutput {
+        val destination = args.optString("destination", "").trim()
+        val vehicleRaw = args.optString("vehicleType", "").trim().lowercase()
+        val appRaw = args.optString("preferredApp", "").trim().lowercase()
+
+        val vehicleOption = when (vehicleRaw) {
+            "bike" -> RideVehicleOption.BIKE
+            "auto" -> RideVehicleOption.AUTO
+            "car_4_seater", "4-seater", "4_seater", "car", "mini", "sedan" -> RideVehicleOption.CAR_4_SEATER
+            "car_6_seater", "6-seater", "6_seater", "xl", "suv" -> RideVehicleOption.CAR_6_SEATER
+            else -> RideBookingAssistHandler.parseVehicleOption(vehicleRaw)
+        }
+        val preferredApp = when (appRaw) {
+            "uber" -> RideApp.UBER
+            "ola" -> RideApp.OLA
+            "rapido" -> RideApp.RAPIDO
+            else -> null
+        }
+
+        val result = runBlocking {
+            RideBookingAssistHandler.processRideCommandWithLocation(
+                context = context,
+                rawQuery = destination,
+                explicitVehicle = vehicleOption,
+                explicitDestination = destination.takeIf { it.isNotBlank() },
+                explicitApp = preferredApp
+            )
+        }
+
+        return when (result) {
+            is RideBookingResult.NeedsVehicleSelection -> ToolExecutionOutput(
+                callId = callId,
+                toolName = "assistRideBooking",
+                success = true,
+                responseData = JSONObject().apply {
+                    put("needsVehicleSelection", true)
+                    put("destination", result.destination)
+                    put("question", result.message)
+                },
+                verbalConfirmation = result.message
+            )
+            is RideBookingResult.Launched -> ToolExecutionOutput(
+                callId = callId,
+                toolName = "assistRideBooking",
+                success = true,
+                responseData = JSONObject().apply {
+                    put("needsVehicleSelection", false)
+                    put("appName", result.appName)
+                    put("vehicleLabel", result.vehicleLabel)
+                    put("deepLinkUri", result.deepLinkUri)
+                    put("userMustConfirmBookingAndPay", true)
+                },
+                verbalConfirmation = result.message
+            )
+            is RideBookingResult.Cancelled -> ToolExecutionOutput(
+                callId = callId,
+                toolName = "assistRideBooking",
+                success = true,
+                responseData = JSONObject().apply { put("cancelled", true) },
+                verbalConfirmation = result.message
+            )
+            is RideBookingResult.Failure -> ToolExecutionOutput(
+                callId = callId,
+                toolName = "assistRideBooking",
+                success = false,
+                responseData = JSONObject().apply { put("error", result.message) },
+                verbalConfirmation = result.message
+            )
+        }
+    }
+
+    private fun executeAssistShoppingSearch(context: Context, callId: String, args: JSONObject): ToolExecutionOutput {
+        val appName = args.optString("appName", "Flipkart").trim()
+        val productQuery = args.optString("productQuery", "").trim()
+
+        val result = ShoppingAssistHandler.processShoppingCommand(
+            context = context,
+            rawQuery = "$appName $productQuery",
+            explicitStoreName = appName,
+            explicitProductQuery = productQuery.takeIf { it.isNotBlank() }
+        )
+
+        return when (result) {
+            is ShoppingAssistResult.OpenedWithSearch -> ToolExecutionOutput(
+                callId = callId,
+                toolName = "assistShoppingSearch",
+                success = true,
+                responseData = JSONObject().apply {
+                    put("appName", result.appName)
+                    put("productQuery", result.productQuery)
+                    put("openedUri", result.openedUri)
+                    put("userMustAddToCartAndPay", true)
+                },
+                verbalConfirmation = result.message
+            )
+            is ShoppingAssistResult.OpenedAppOnly -> ToolExecutionOutput(
+                callId = callId,
+                toolName = "assistShoppingSearch",
+                success = true,
+                responseData = JSONObject().apply {
+                    put("appName", result.appName)
+                    put("productQuery", result.productQuery)
+                    put("openedAppOnly", true)
+                    put("userMustAddToCartAndPay", true)
+                },
+                verbalConfirmation = result.message
+            )
+            is ShoppingAssistResult.Failure -> ToolExecutionOutput(
+                callId = callId,
+                toolName = "assistShoppingSearch",
+                success = false,
+                responseData = JSONObject().apply { put("error", result.message) },
+                verbalConfirmation = result.message
+            )
+        }
     }
 }

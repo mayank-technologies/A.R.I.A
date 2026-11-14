@@ -131,6 +131,14 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     private val _weatherCondition = MutableStateFlow("Clear Sky")
     val weatherCondition: StateFlow<String> = _weatherCondition.asStateFlow()
 
+    private val _currentCity = MutableStateFlow("Delhi")
+    val currentCity: StateFlow<String> = _currentCity.asStateFlow()
+
+    private val _needsLocationPermission = MutableStateFlow(
+        !com.example.assistant.ArcLocationManager.isLocationPermissionGranted(application)
+    )
+    val needsLocationPermission: StateFlow<Boolean> = _needsLocationPermission.asStateFlow()
+
     private var hasAutoGreeted = false
 
     private val _latestResponse = MutableStateFlow("Hello Boss! Mai ARC hu, aapka AI Voice Assistant.")
@@ -243,20 +251,36 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun refreshWeatherBadge() {
+    fun refreshWeatherBadge(forceLocationRefresh: Boolean = false) {
         viewModelScope.launch {
-            val snap = commandProcessor.fetchWeatherSnapshot("Delhi")
+            val snap = commandProcessor.fetchWeatherSnapshot(city = null, forceLocationRefresh = forceLocationRefresh)
             _weatherTemp.value = snap.tempDisplay
             _weatherCondition.value = snap.condition
+            _currentCity.value = snap.city
+            _needsLocationPermission.value = !com.example.assistant.ArcLocationManager.isLocationPermissionGranted(getApplication())
         }
+    }
+
+    fun onLocationPermissionUpdated() {
+        val granted = com.example.assistant.ArcLocationManager.refreshPermissionState(getApplication())
+        _needsLocationPermission.value = !granted
+        if (granted) {
+            addActivityLog("📍", "GPS Location Active", "Local weather & ride pickup enabled")
+            refreshWeatherBadge(forceLocationRefresh = true)
+        }
+    }
+
+    fun requestLocalWeatherUpdate() {
+        submitTextCommand("Weather update")
     }
 
     fun triggerBriefingSummary(listenAfter: Boolean = false) {
         viewModelScope.launch {
             _assistantStatus.value = AssistantStatus.PROCESSING
-            val snap = commandProcessor.fetchWeatherSnapshot("Delhi")
+            val snap = commandProcessor.fetchWeatherSnapshot(city = null)
             _weatherTemp.value = snap.tempDisplay
             _weatherCondition.value = snap.condition
+            _currentCity.value = snap.city
 
             val briefingText = commandProcessor.generateBriefingSummary(_userName.value)
             hasAutoGreeted = true

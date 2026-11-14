@@ -1,38 +1,58 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
-import androidx.compose.material.icons.filled.BlurOn
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Psychology
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,187 +61,637 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.AssistantStatus
-import com.example.ui.components.ArcReactorVisualizer
-import com.example.ui.theme.CyberCyan
+import com.example.ui.components.ParticleAvatar3D
+import com.example.ui.theme.CarbonBlack
+import com.example.ui.theme.CobaltTech
 import com.example.ui.theme.DeepSpace
-import com.example.ui.theme.ElectricEmerald
-import com.example.ui.theme.SurfaceDark
+import com.example.ui.theme.ElectricBlue
+import com.example.ui.theme.ElectricCyan
+import com.example.ui.theme.GlassBackground
+import com.example.ui.theme.GlassBorderCyan
+import com.example.ui.theme.HologramBlue
+import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.WarningAmber
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.random.Random
 
+/**
+ * Futuristic JARVIS / ARC HUD Onboarding Screen:
+ * - Background: DeepSpace-to-CarbonBlack canvas with subtle radial energy bloom,
+ *   blueprint HUD grid, and softly drifting cyan/blue micro-particles.
+ * - Top Core Icon: Cyan/blue ParticleAvatar3D orb framed inside an animated
+ *   glassmorphism HUD ring with outer neon aura (replaces the old orange target).
+ * - Typography Hierarchy: Telemetry subtitle -> Bold primary prompt with cyan
+ *   text-shadow glow -> Muted readable description with generous breathing space.
+ * - Input Field: Unified translucent glassmorphism card with thin glowing cyan
+ *   border and glowing accent Person badge (no harsh double inner borders).
+ * - CTA Button: Horizontal ElectricCyan -> HologramBlue -> CobaltTech gradient
+ *   button with interactive hover/press glow amplification.
+ */
 @Composable
 fun OnboardingScreen(
     onComplete: (String) -> Unit
 ) {
     var nameText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isInputFocused by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
 
     fun submit() {
         val trimmed = nameText.trim()
         if (trimmed.isEmpty()) {
-            errorMessage = "Please enter your name Boss!"
+            errorMessage = "Please enter your name, Boss!"
         } else {
             keyboardController?.hide()
             onComplete(trimmed)
         }
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepSpace)
-            .padding(24.dp),
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(DeepSpace, CarbonBlack, DeepSpace)
+                )
+            ),
         contentAlignment = Alignment.Center
     ) {
+        val isCompactHeight = maxHeight < 600.dp
+
+        // 1. Subtle Futuristic Tech-HUD Grid + Radial Bloom + Drifting Particles Background
+        OnboardingHudBackdrop(modifier = Modifier.fillMaxSize())
+
+        // 2. Responsive Centered HUD Content Column with Safe Area & Keyboard Insets
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            // Futuristic Arc Reactor Header
-            Box(
-                modifier = Modifier
-                    .size(110.dp)
-                    .clip(CircleShape)
-                    .background(CyberCyan.copy(alpha = 0.1f))
-                    .border(2.dp, CyberCyan, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                ArcReactorVisualizer(
-                    status = AssistantStatus.LISTENING,
-                    modifier = Modifier.size(90.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 520.dp)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    horizontal = 26.dp,
+                    vertical = if (isCompactHeight) 16.dp else 28.dp
                 )
-            }
+        ) {
+            // Top Icon: Cyan/Blue Glass-Morphism Ring + Particle Shimmer Core
+            OnboardingCoreHeader(
+                outerSize = if (isCompactHeight) 116.dp else 144.dp,
+                ringSize = if (isCompactHeight) 92.dp else 112.dp,
+                orbSize = if (isCompactHeight) 84.dp else 104.dp
+            )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(if (isCompactHeight) 20.dp else 34.dp))
 
+            // Title Hierarchy — Level 1: Subtle Letter-Spaced Telemetry Label
             Text(
                 text = "ARC SYSTEM INITIALIZATION",
-                color = CyberCyan,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp,
+                color = HologramBlue.copy(alpha = 0.85f),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 3.2.sp,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
+            // Title Hierarchy — Level 2: Bold Primary Heading with Subtle Cyan Accent Glow
             Text(
                 text = "What should I call you?",
-                color = TextPrimary,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
+                style = TextStyle(
+                    color = TextPrimary,
+                    fontSize = if (isCompactHeight) 25.sp else 28.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.3.sp,
+                    textAlign = TextAlign.Center,
+                    shadow = Shadow(
+                        color = ElectricCyan.copy(alpha = 0.45f),
+                        offset = Offset(0f, 0f),
+                        blurRadius = 20f
+                    )
+                )
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
+            // Title Hierarchy — Level 3: Muted Description with Breathing Room
             Text(
                 text = "Enter your name to personalize your AI voice assistant experience.",
                 color = TextSecondary,
-                fontSize = 13.sp,
+                fontSize = 14.sp,
                 textAlign = TextAlign.Center,
-                lineHeight = 18.sp,
-                modifier = Modifier.padding(horizontal = 16.dp)
+                lineHeight = 21.sp,
+                modifier = Modifier.padding(horizontal = 18.dp)
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(if (isCompactHeight) 24.dp else 38.dp))
 
-            // Text Input Field
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (errorMessage != null) WarningAmber else CyberCyan.copy(alpha = 0.4f)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    OutlinedTextField(
+            // 3. Glassmorphism Name Input Card (Translucent Frost + Thin Glowing Cyan Border)
+            val inputBorderColor by animateColorAsState(
+                targetValue = when {
+                    errorMessage != null -> WarningAmber
+                    isInputFocused -> ElectricCyan
+                    else -> GlassBorderCyan
+                },
+                animationSpec = tween(durationMillis = 220),
+                label = "onboarding_input_border"
+            )
+            val inputGlowAlpha by animateFloatAsState(
+                targetValue = if (isInputFocused) 0.28f else 0.10f,
+                animationSpec = tween(durationMillis = 220),
+                label = "onboarding_input_glow"
+            )
+
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .drawBehind {
+                            // Subtle outer ambient neon border bloom
+                            drawRoundRect(
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(
+                                        ElectricCyan.copy(alpha = inputGlowAlpha),
+                                        HologramBlue.copy(alpha = inputGlowAlpha * 0.85f),
+                                        ElectricCyan.copy(alpha = inputGlowAlpha)
+                                    )
+                                ),
+                                cornerRadius = CornerRadius(24.dp.toPx(), 24.dp.toPx()),
+                                style = Stroke(width = 6.dp.toPx())
+                            )
+                        }
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0x990D182E),
+                                    GlassBackground
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.2.dp,
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(
+                                    inputBorderColor,
+                                    HologramBlue.copy(alpha = if (isInputFocused) 0.9f else 0.45f),
+                                    inputBorderColor
+                                )
+                            ),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    TextField(
                         value = nameText,
                         onValueChange = {
                             nameText = it
                             if (errorMessage != null) errorMessage = null
                         },
-                        placeholder = { Text("Enter your name...", color = TextSecondary) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = "Name Icon",
-                                tint = CyberCyan
+                        placeholder = {
+                            Text(
+                                text = "Enter your name...",
+                                color = TextMuted,
+                                fontSize = 15.sp
                             )
+                        },
+                        leadingIcon = {
+                            // Glowing Accent Badge around the Person Icon
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .drawBehind {
+                                        drawCircle(
+                                            brush = Brush.radialGradient(
+                                                colors = listOf(
+                                                    ElectricCyan.copy(alpha = if (isInputFocused) 0.36f else 0.22f),
+                                                    Color.Transparent
+                                                )
+                                            ),
+                                            radius = size.minDimension * 0.72f
+                                        )
+                                    }
+                                    .clip(CircleShape)
+                                    .background(ElectricCyan.copy(alpha = 0.12f))
+                                    .border(
+                                        width = 1.dp,
+                                        color = ElectricCyan.copy(alpha = 0.45f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = "Name Icon",
+                                    tint = ElectricCyan,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = { submit() }),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = CyberCyan,
-                            unfocusedBorderColor = CyberCyan.copy(alpha = 0.3f),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,
-                            cursorColor = CyberCyan
+                            cursorColor = ElectricCyan
+                        ),
+                        textStyle = TextStyle(
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.3.sp
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .onFocusChanged { isInputFocused = it.isFocused }
                             .testTag("onboarding_name_input")
                     )
-
-                    if (errorMessage != null) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = errorMessage ?: "",
-                            color = WarningAmber,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // Get Started / Continue Button
-            Button(
-                onClick = { submit() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = CyberCyan,
-                    contentColor = DeepSpace
-                ),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp)
-                    .testTag("onboarding_continue_button")
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                AnimatedVisibility(
+                    visible = errorMessage != null,
+                    enter = fadeIn(tween(180)),
+                    exit = fadeOut(tween(150))
                 ) {
                     Text(
-                        text = "GET STARTED",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Icon(
-                        imageVector = Icons.Default.ArrowForward,
-                        contentDescription = "Continue",
-                        modifier = Modifier.size(20.dp)
+                        text = errorMessage.orEmpty(),
+                        color = WarningAmber,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(start = 10.dp, top = 8.dp)
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(if (isCompactHeight) 20.dp else 30.dp))
+
+            // 4. Gradient Glow CTA Button ("GET STARTED ->") matching HUD rounded geometry
+            OnboardingGlowButton(
+                text = "GET STARTED",
+                onClick = { submit() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("onboarding_continue_button")
+            )
+        }
+    }
+}
+
+/**
+ * Top Futuristic Cyan/Blue HUD Core Header:
+ * Replaces the earlier orange target ring with an ambient cyan/blue halo,
+ * rotating HUD glass-morphism bracket ring, and the dense ParticleAvatar3D shimmer orb.
+ */
+@Composable
+private fun OnboardingCoreHeader(
+    outerSize: Dp = 144.dp,
+    ringSize: Dp = 112.dp,
+    orbSize: Dp = 104.dp
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "onboarding_core_ring")
+    val ringRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 16000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "ring_rotation"
+    )
+    val outerGlowPulse by infiniteTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "outer_glow_pulse"
+    )
+
+    Box(
+        modifier = Modifier.size(outerSize),
+        contentAlignment = Alignment.Center
+    ) {
+        // Soft outer cyan/blue glass-ring illumination + rotating segmented HUD ring
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val ringRadius = size.minDimension * 0.42f
+
+            // Subtle ambient radial halo behind the glass ring
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        ElectricCyan.copy(alpha = 0.24f * outerGlowPulse),
+                        ElectricBlue.copy(alpha = 0.12f),
+                        Color.Transparent
+                    ),
+                    center = center,
+                    radius = size.minDimension * 0.50f * outerGlowPulse
+                ),
+                radius = size.minDimension * 0.50f * outerGlowPulse,
+                center = center
+            )
+
+            // Subtle dashed orbital telemetry ring
+            drawCircle(
+                color = HologramBlue.copy(alpha = 0.24f),
+                radius = ringRadius * 1.12f,
+                center = center,
+                style = Stroke(
+                    width = 1.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 10f), 0f)
+                )
+            )
+
+            // Rotating precision cyan/blue HUD arc segments
+            rotate(degrees = ringRotation, pivot = center) {
+                val arcSize = Size(ringRadius * 2f, ringRadius * 2f)
+                val arcTopLeft = Offset(center.x - ringRadius, center.y - ringRadius)
+                drawArc(
+                    brush = Brush.sweepGradient(
+                        listOf(ElectricCyan, HologramBlue, Color.Transparent, ElectricCyan)
+                    ),
+                    startAngle = 0f,
+                    sweepAngle = 110f,
+                    useCenter = false,
+                    topLeft = arcTopLeft,
+                    size = arcSize,
+                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                )
+                drawArc(
+                    color = ElectricCyan.copy(alpha = 0.7f),
+                    startAngle = 180f,
+                    sweepAngle = 110f,
+                    useCenter = false,
+                    topLeft = arcTopLeft,
+                    size = arcSize,
+                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+        }
+
+        // Translucent Glass-Morphism Ring framing the Shimmer Particle Sphere
+        Box(
+            modifier = Modifier
+                .size(ringSize)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0x550A1B33),
+                            GlassBackground
+                        )
+                    )
+                )
+                .border(
+                    width = 1.25.dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            ElectricCyan.copy(alpha = 0.75f),
+                            HologramBlue.copy(alpha = 0.35f),
+                            ElectricCyan.copy(alpha = 0.65f)
+                        )
+                    ),
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            // Reuses the app's signature cyan/blue ParticleAvatar3D shimmer sphere (IDLE = pure cyan/blue)
+            ParticleAvatar3D(
+                status = AssistantStatus.IDLE,
+                modifier = Modifier.size(orbSize)
+            )
+        }
+    }
+}
+
+/**
+ * Gradient Glow Primary Action Button:
+ * Features an ElectricCyan -> HologramBlue -> CobaltTech gradient, rounded 20.dp corners
+ * matching the glassmorphism card above, and dynamic glow amplification on hover/press.
+ */
+@Composable
+private fun OnboardingGlowButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val isHovered by interactionSource.collectIsHoveredAsState()
+
+    val glowStrength by animateFloatAsState(
+        targetValue = when {
+            isPressed -> 0.62f
+            isHovered -> 0.48f
+            else -> 0.26f
+        },
+        animationSpec = tween(durationMillis = 160),
+        label = "button_glow_strength"
+    )
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.985f else 1f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 450f),
+        label = "button_press_scale"
+    )
+
+    val shape = RoundedCornerShape(20.dp)
+
+    Box(
+        modifier = modifier
+            .scale(pressScale)
+            .drawBehind {
+                // Soft outer gradient halo whose intensity intensifies on hover/press
+                drawRoundRect(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            ElectricCyan.copy(alpha = glowStrength),
+                            HologramBlue.copy(alpha = glowStrength * 0.9f),
+                            CobaltTech.copy(alpha = glowStrength * 0.8f)
+                        )
+                    ),
+                    cornerRadius = CornerRadius(24.dp.toPx(), 24.dp.toPx()),
+                    style = Stroke(width = if (isPressed || isHovered) 10.dp.toPx() else 6.dp.toPx())
+                )
+            }
+            .height(56.dp)
+            .clip(shape)
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        ElectricCyan,
+                        HologramBlue,
+                        CobaltTech
+                    )
+                )
+            )
+            .border(
+                BorderStroke(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = if (isPressed || isHovered) 0.55f else 0.30f)
+                ),
+                shape = shape
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(color = DeepSpace.copy(alpha = 0.25f)),
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = text,
+                color = DeepSpace,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.8.sp
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = "Continue",
+                tint = DeepSpace,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+private data class HudStar(
+    val xFraction: Float,
+    val yFraction: Float,
+    val radiusDp: Float,
+    val phase: Float,
+    val isCyan: Boolean
+)
+
+/**
+ * Subtle Tech-HUD Backdrop:
+ * Combines a soft centered radial glow, faint coordinate grid lines,
+ * and gentle ambient micro-particles so the background matches the avatar HUD aesthetic
+ * without competing with foreground readability.
+ */
+@Composable
+private fun OnboardingHudBackdrop(modifier: Modifier = Modifier) {
+    val stars = remember {
+        val rng = Random(2026)
+        List(28) { idx ->
+            HudStar(
+                xFraction = rng.nextFloat(),
+                yFraction = rng.nextFloat(),
+                radiusDp = 1.0f + rng.nextFloat() * 1.4f,
+                phase = rng.nextFloat() * (2f * PI.toFloat()),
+                isCyan = idx % 2 == 0
+            )
+        }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "hud_backdrop_drift")
+    val driftPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 9000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "drift_phase"
+    )
+
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+
+        // Top-center subtle radial glow behind the HUD core
+        val glowCenter = Offset(w * 0.5f, h * 0.28f)
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    ElectricCyan.copy(alpha = 0.11f),
+                    ElectricBlue.copy(alpha = 0.05f),
+                    Color.Transparent
+                ),
+                center = glowCenter,
+                radius = maxOf(w, h) * 0.55f
+            )
+        )
+
+        // Subtle blueprint HUD grid texture
+        val stepPx = 44.dp.toPx()
+        val gridLineColor = ElectricCyan.copy(alpha = 0.032f)
+        var x = stepPx
+        while (x < w) {
+            drawLine(
+                color = gridLineColor,
+                start = Offset(x, 0f),
+                end = Offset(x, h),
+                strokeWidth = 0.8.dp.toPx()
+            )
+            x += stepPx
+        }
+        var y = stepPx
+        while (y < h) {
+            drawLine(
+                color = gridLineColor,
+                start = Offset(0f, y),
+                end = Offset(w, y),
+                strokeWidth = 0.8.dp.toPx()
+            )
+            y += stepPx
+        }
+
+        // Low-opacity twinkling micro-particles
+        stars.forEach { star ->
+            val shimmer = 0.5f + 0.5f * sin(driftPhase + star.phase)
+            val px = star.xFraction * w + cos(driftPhase * 0.5f + star.phase) * 3.dp.toPx()
+            val py = star.yFraction * h + sin(driftPhase * 0.5f + star.phase) * 3.dp.toPx()
+            val color = if (star.isCyan) ElectricCyan else HologramBlue
+            drawCircle(
+                color = color.copy(alpha = 0.08f + shimmer * 0.16f),
+                radius = star.radiusDp.dp.toPx(),
+                center = Offset(px, py)
+            )
         }
     }
 }

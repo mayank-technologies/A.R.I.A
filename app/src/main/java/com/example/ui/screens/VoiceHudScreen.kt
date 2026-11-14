@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -52,6 +54,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Replay
@@ -106,6 +109,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.assistant.ArcLocationManager
 import com.example.assistant.DeviceClockHelper
 import com.example.assistant.battery.AriaBatterySaverManager
 import com.example.geminilive.GeminiLiveSessionState
@@ -238,6 +242,8 @@ fun VoiceHudScreen(
     val assistantStatus by viewModel.assistantStatus.collectAsState()
     val isArcPoweredOn by viewModel.isArcPoweredOn.collectAsState()
     val weatherTemp by viewModel.weatherTemp.collectAsState()
+    val currentCity by viewModel.currentCity.collectAsState()
+    val needsLocationPermission by viewModel.needsLocationPermission.collectAsState()
     val latestResponse by viewModel.latestResponse.collectAsState()
     val lastQuery by viewModel.lastQuery.collectAsState()
     val pendingWebUrl by viewModel.pendingWebUrl.collectAsState()
@@ -255,6 +261,23 @@ fun VoiceHudScreen(
     val batteryLevel by AriaBatterySaverManager.batteryLevel.collectAsState()
     val isCharging by AriaBatterySaverManager.isCharging.collectAsState()
     val manualBatteryOverride by AriaBatterySaverManager.manualOverride.collectAsState()
+
+    val context = LocalContext.current
+    var hasPromptedLocationOnce by remember { mutableStateOf(false) }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.onLocationPermissionUpdated()
+    }
+
+    LaunchedEffect(needsLocationPermission) {
+        if (needsLocationPermission && !hasPromptedLocationOnce) {
+            hasPromptedLocationOnce = true
+            locationPermissionLauncher.launch(ArcLocationManager.REQUIRED_LOCATION_PERMISSIONS)
+        } else if (!needsLocationPermission) {
+            viewModel.onLocationPermissionUpdated()
+        }
+    }
 
     var inputText by remember { mutableStateOf("") }
     var showChatSheet by remember { mutableStateOf(false) }
@@ -491,42 +514,89 @@ fun VoiceHudScreen(
                 }
 
                 // -------------------------------------------------------------
-                // 3. INFO PILLS ROW (SARA-style: Weather | Tasks | Time)
+                // 3. INFO PILLS ROW (Weather via GPS | Tasks | Time)
                 // -------------------------------------------------------------
-                Row(
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .widthIn(max = 420.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically
+                        .widthIn(max = 420.dp)
                 ) {
-                    HudInfoPill(
-                        icon = Icons.Default.WbSunny,
-                        label = weatherTemp,
-                        accentColor = ElectricCyan,
-                        onClick = { viewModel.submitTextCommand("Weather in Delhi") },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("info_pill_weather")
-                    )
-                    HudInfoPill(
-                        icon = Icons.Default.Notifications,
-                        label = "$activeTaskCount Tasks",
-                        accentColor = HologramBlue,
-                        onClick = { viewModel.submitTextCommand("Show my tasks") },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("info_pill_tasks")
-                    )
-                    HudInfoPill(
-                        icon = Icons.Default.Schedule,
-                        label = liveTime,
-                        accentColor = ElectricCyan,
-                        onClick = { viewModel.triggerBriefingSummary() },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("info_pill_time")
-                    )
+                    if (needsLocationPermission) {
+                        Surface(
+                            onClick = {
+                                locationPermissionLauncher.launch(ArcLocationManager.REQUIRED_LOCATION_PERMISSIONS)
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            color = WarningAmber.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, WarningAmber.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("enable_gps_location_chip")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MyLocation,
+                                    contentDescription = "Enable GPS Location",
+                                    tint = WarningAmber,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "ENABLE GPS FOR LOCAL WEATHER & RIDES",
+                                    color = WarningAmber,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = 0.7.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        HudInfoPill(
+                            icon = Icons.Default.WbSunny,
+                            label = if (needsLocationPermission) weatherTemp else "$weatherTemp · $currentCity",
+                            accentColor = ElectricCyan,
+                            onClick = {
+                                if (needsLocationPermission) {
+                                    locationPermissionLauncher.launch(ArcLocationManager.REQUIRED_LOCATION_PERMISSIONS)
+                                } else {
+                                    viewModel.requestLocalWeatherUpdate()
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("info_pill_weather")
+                        )
+                        HudInfoPill(
+                            icon = Icons.Default.Notifications,
+                            label = "$activeTaskCount Tasks",
+                            accentColor = HologramBlue,
+                            onClick = { viewModel.submitTextCommand("Show my tasks") },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("info_pill_tasks")
+                        )
+                        HudInfoPill(
+                            icon = Icons.Default.Schedule,
+                            label = liveTime,
+                            accentColor = ElectricCyan,
+                            onClick = { viewModel.triggerBriefingSummary() },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("info_pill_time")
+                        )
+                    }
                 }
 
                 // -------------------------------------------------------------

@@ -99,9 +99,11 @@ import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import com.example.assistant.ArcLocationManager
 import com.example.assistant.battery.AriaBatterySaverManager
 
 @Composable
@@ -122,6 +124,9 @@ fun QuickToolsScreen(
     val isCharging by AriaBatterySaverManager.isCharging.collectAsState()
     val manualOverride by AriaBatterySaverManager.manualOverride.collectAsState()
 
+    val currentCity by viewModel.currentCity.collectAsState()
+    val needsLocationPermission by viewModel.needsLocationPermission.collectAsState()
+
     var showDeveloperHubDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
     var showOverlayPermissionDialog by remember { mutableStateOf(false) }
@@ -129,11 +134,20 @@ fun QuickToolsScreen(
     var showAccessibilityOnboardingDialog by remember { mutableStateOf(false) }
 
     var editNameText by remember(userName) { mutableStateOf(userName) }
-    var weatherCity by remember { mutableStateOf("Delhi") }
+    var weatherCity by remember(currentCity) { mutableStateOf(currentCity) }
     var wikiSearchText by remember { mutableStateOf("") }
     var calcInput by remember { mutableStateOf("") }
     var calcResult by remember { mutableStateOf("0") }
     var notepadText by remember { mutableStateOf("") }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.onLocationPermissionUpdated()
+        if (ArcLocationManager.isLocationPermissionGranted(context)) {
+            viewModel.requestLocalWeatherUpdate()
+        }
+    }
 
     val screenCaptureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -1226,7 +1240,7 @@ fun QuickToolsScreen(
                         OutlinedTextField(
                             value = weatherCity,
                             onValueChange = { weatherCity = it },
-                            placeholder = { Text("Enter city...", color = TextSecondary) },
+                            placeholder = { Text("Enter city or tap GPS...", color = TextSecondary) },
                             modifier = Modifier.weight(1f),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
@@ -1240,11 +1254,36 @@ fun QuickToolsScreen(
                             shape = RoundedCornerShape(12.dp)
                         )
 
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        IconButton(
+                            onClick = {
+                                if (needsLocationPermission) {
+                                    locationPermissionLauncher.launch(ArcLocationManager.REQUIRED_LOCATION_PERMISSIONS)
+                                } else {
+                                    viewModel.onLocationPermissionUpdated()
+                                    viewModel.requestLocalWeatherUpdate()
+                                }
+                            },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MyLocation,
+                                contentDescription = "Use Current GPS Location",
+                                tint = if (needsLocationPermission) WarningAmber else CyberCyan
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(4.dp))
 
                         Button(
                             onClick = {
-                                viewModel.submitTextCommand("Weather in $weatherCity")
+                                val targetCity = weatherCity.trim()
+                                if (targetCity.isBlank()) {
+                                    viewModel.requestLocalWeatherUpdate()
+                                } else {
+                                    viewModel.submitTextCommand("Weather in $targetCity")
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
                             shape = RoundedCornerShape(12.dp)

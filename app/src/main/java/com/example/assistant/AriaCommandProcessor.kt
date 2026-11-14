@@ -9,6 +9,8 @@ import com.example.api.WeatherClient
 import com.example.api.WikipediaClient
 import com.example.assistant.AriaScreenLockManager
 import com.example.assistant.battery.AriaBatterySaverManager
+import com.example.claude.ClaudeReasoningEngine
+import com.example.claude.ClaudeReasoningResult
 import com.example.data.AriaDao
 import com.example.data.ReminderEntity
 import com.example.data.VoiceHistoryEntity
@@ -54,6 +56,33 @@ class AriaCommandProcessor(
                     )
                 }
             }
+        }
+
+        // 0.405 Ride Booking Assist (Uber / Ola / Rapido) & Pending Bike/4-seater/6-seater Reply
+        if (RideBookingAssistHandler.isPendingVehicleReply(queryLower) ||
+            RideBookingAssistHandler.isRideBookingCommand(queryLower)
+        ) {
+            val rideRes = RideBookingAssistHandler.processRideCommandWithLocation(context, userQuery)
+            val (reply, url) = when (rideRes) {
+                is RideBookingResult.NeedsVehicleSelection -> Pair(rideRes.message, null)
+                is RideBookingResult.Launched -> Pair(rideRes.message, rideRes.fallbackWebUrl)
+                is RideBookingResult.Cancelled -> Pair(rideRes.message, null)
+                is RideBookingResult.Failure -> Pair(rideRes.message, null)
+            }
+            saveHistory(userQuery, reply, "RIDE_ASSIST")
+            return@withContext AriaCommandResult.TextResponse(reply, "RIDE_ASSIST", openUrl = url)
+        }
+
+        // 0.406 Shopping Search Assist (Flipkart / Flipkart Minutes / Blinkit / Zepto / Amazon / Instamart)
+        if (ShoppingAssistHandler.isShoppingOrderCommand(queryLower)) {
+            val shopRes = ShoppingAssistHandler.processShoppingCommand(context, userQuery)
+            val (reply, url) = when (shopRes) {
+                is ShoppingAssistResult.OpenedWithSearch -> Pair(shopRes.message, shopRes.openedUri.takeIf { it.startsWith("http") })
+                is ShoppingAssistResult.OpenedAppOnly -> Pair(shopRes.message, shopRes.fallbackSearchUrl)
+                is ShoppingAssistResult.Failure -> Pair(shopRes.message, null)
+            }
+            saveHistory(userQuery, reply, "SHOPPING_ASSIST")
+            return@withContext AriaCommandResult.TextResponse(reply, "SHOPPING_ASSIST", openUrl = url)
         }
 
         // 0.40 Anti-Theft Siren Guard Commands ("ARC, security on karo", "security off karo", "siren guard")
@@ -674,14 +703,26 @@ class AriaCommandProcessor(
         }
 
         // 6. Weather command
-        if (queryLower.contains("weather") || queryLower.contains("mausam") || queryLower.contains("temperature") || queryLower.contains("ba بارش") || queryLower.contains("barish")) {
+        if (queryLower.contains("weather") || queryLower.contains("mausam") || queryLower.contains("temperature") || queryLower.contains("barish")) {
             val city = extractCity(userQuery)
             val weatherReply = tryGetWeather(city)
             saveHistory(userQuery, weatherReply, "WEATHER")
             return@withContext AriaCommandResult.TextResponse(weatherReply, "WEATHER")
         }
 
-        // 7. Conversational AI fallback via Gemini API
+        // 7. Conversational & Multi-Step Reasoning Brain: Claude (Anthropic) primary -> Gemini API fallback
+        val claudeResult = ClaudeReasoningEngine.reasonAndExecute(
+            context = context,
+            userTranscript = userQuery,
+            userName = displayName,
+            executeTools = true
+        )
+        if (claudeResult is ClaudeReasoningResult.Success) {
+            saveHistory(userQuery, claudeResult.spokenResponse, "CLAUDE_BRAIN")
+            return@withContext AriaCommandResult.TextResponse(claudeResult.spokenResponse, "CLAUDE_BRAIN")
+        }
+
+        // Seamless fallback to Gemini if Claude API key is missing or Anthropic endpoint fails
         val aiReply = GeminiClient.queryAriaAi(userQuery)
         saveHistory(userQuery, aiReply, "AI")
         return@withContext AriaCommandResult.TextResponse(aiReply, "AI")
@@ -738,27 +779,65 @@ class AriaCommandProcessor(
             .trim()
     }
 
-    private fun extractCity(query: String): String {
-        var clean = query.replace("weather in", "", ignoreCase = true)
-            .replace("weather of", "", ignoreCase = true)
-            .replace("mausam in", "", ignoreCase = true)
-            .replace("mausam kaisa hai", "", ignoreCase = true)
-            .replace("weather", "", ignoreCase = true)
+    internal fun extractCity(query: String): String? {
+        val clean = query
+            .replace(Regex("(?i)\\b(weather in|weather of|weather at|weather for|mausam in|mausam of|mausam kaisa hai|aaj ka mausam|weather update|weather today|live weather|current location weather|local weather|temperature|weather|mausam|barish|today|aaj|ka|ki|ke|kaisa|hai|hogi|kya|batao|batayein|dikhao|check|show|me|please|my|current|location)\\b"), " ")
+            .replace(Regex("\\s+"), " ")
             .trim()
-        if (clean.isBlank()) clean = "Delhi"
-        return clean
+        return clean.takeIf { it.isNotBlank() }
     }
 
     data class WeatherSnapshot(
         val tempDisplay: String,
         val condition: String,
         val city: String,
-        val summaryLine: String
+        val summaryLine: String,
+        val isCurrentLocation: Boolean = false
     )
 
-    suspend fun fetchWeatherSnapshot(city: String = "Delhi"): WeatherSnapshot {
+    suspend fun fetchWeatherSnapshot(
+        city: String? = null,
+        forceLocationRefresh: Boolean = false
+    ): WeatherSnapshot {
+        val requestedCity = city?.trim()?.takeIf { it.isNotBlank() }
+
+        // If no specific city was named, automatically resolve current GPS coordinates & city
+        if (requestedCity == null) {
+            val gpsLoc = ArcLocationManager.getCurrentLocationInfo(context, forceRefresh = forceLocationRefresh)
+            if (gpsLoc != null) {
+                val cityName = gpsLoc.city ?: gpsLoc.locality ?: "Your Location"
+                val label = gpsLoc.displayLabel()
+                return try {
+                    val forecast = com.example.api.WeatherClient.forecastService.getForecast(
+                        lat = gpsLoc.latitude,
+                        lon = gpsLoc.longitude
+                    )
+                    val cw = forecast.current_weather
+                    val temp = cw?.temperature?.toInt() ?: 26
+                    val condition = com.example.api.mapWeatherCode(cw?.weathercode)
+                    val wind = cw?.windspeed?.toInt() ?: 10
+                    WeatherSnapshot(
+                        tempDisplay = "${temp}°C",
+                        condition = condition,
+                        city = cityName,
+                        summaryLine = "$label: $condition, $temp°C, Wind $wind km/h",
+                        isCurrentLocation = true
+                    )
+                } catch (_: Exception) {
+                    WeatherSnapshot(
+                        tempDisplay = "26°C",
+                        condition = "Clear sky",
+                        city = cityName,
+                        summaryLine = "$label: Clear sky, 26°C",
+                        isCurrentLocation = true
+                    )
+                }
+            }
+        }
+
+        val fallbackCity = requestedCity ?: "Delhi"
         return try {
-            val geoRes = com.example.api.WeatherClient.geoService.searchCity(city)
+            val geoRes = com.example.api.WeatherClient.geoService.searchCity(fallbackCity)
             val location = geoRes.results?.firstOrNull()
 
             if (location != null && location.latitude != null && location.longitude != null) {
@@ -770,7 +849,7 @@ class AriaCommandProcessor(
                 val temp = cw?.temperature?.toInt() ?: 26
                 val condition = com.example.api.mapWeatherCode(cw?.weathercode)
                 val wind = cw?.windspeed?.toInt() ?: 10
-                val cityName = location.name ?: city
+                val cityName = location.name ?: fallbackCity
                 val country = location.country ?: ""
                 val locationLabel = if (country.isNotBlank()) "$cityName, $country" else cityName
 
@@ -778,34 +857,37 @@ class AriaCommandProcessor(
                     tempDisplay = "${temp}°C",
                     condition = condition,
                     city = cityName,
-                    summaryLine = "$locationLabel: $condition, $temp°C, Wind $wind km/h"
+                    summaryLine = "$locationLabel: $condition, $temp°C, Wind $wind km/h",
+                    isCurrentLocation = false
                 )
             } else {
                 WeatherSnapshot(
                     tempDisplay = "26°C",
                     condition = "Clear sky",
-                    city = city,
-                    summaryLine = "$city: Clear sky, 26°C"
+                    city = fallbackCity,
+                    summaryLine = "$fallbackCity: Clear sky, 26°C",
+                    isCurrentLocation = false
                 )
             }
         } catch (e: Exception) {
             WeatherSnapshot(
                 tempDisplay = "26°C",
                 condition = "Clear sky",
-                city = city,
-                summaryLine = "$city: Weather 26°C, Clear sky"
+                city = fallbackCity,
+                summaryLine = "$fallbackCity: Weather 26°C, Clear sky",
+                isCurrentLocation = false
             )
         }
     }
 
-    suspend fun tryGetWeather(city: String): String {
+    suspend fun tryGetWeather(city: String? = null): String {
         return fetchWeatherSnapshot(city).summaryLine
     }
 
     /**
      * Cohesive Auto-Greeting briefing:
      * Time-aware greeting ("Hello [Name]! Good morning/afternoon/evening/night"),
-     * today's weather, and today's tasks/reminders.
+     * today's local GPS weather (or Delhi fallback), and today's tasks/reminders.
      */
     suspend fun generateBriefingSummary(userName: String): String = withContext(Dispatchers.IO) {
         val displayName = userName.ifBlank { "Boss" }
@@ -822,7 +904,7 @@ class AriaCommandProcessor(
             else -> "Good night"
         }
 
-        val weather = fetchWeatherSnapshot("Delhi")
+        val weather = fetchWeatherSnapshot(city = null)
 
         val allRemindersList = try {
             ariaDao.getAllReminders().first()

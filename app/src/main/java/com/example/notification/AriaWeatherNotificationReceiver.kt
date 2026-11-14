@@ -1,26 +1,19 @@
 package com.example.notification
 
-import android.Manifest
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.location.Geocoder
-import android.location.LocationManager
 import android.media.RingtoneManager
-import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.api.WeatherClient
 import com.example.api.mapWeatherCode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.util.Locale
 
 class AriaWeatherNotificationReceiver : BroadcastReceiver() {
 
@@ -47,9 +40,10 @@ class AriaWeatherNotificationReceiver : BroadcastReceiver() {
     }
 
     private suspend fun fetchWeatherForLocation(context: Context): String {
-        val coords = getDeviceLocation(context)
-        return if (coords != null) {
-            val (lat, lon) = coords
+        val locInfo = com.example.assistant.ArcLocationManager.getCurrentLocationInfo(context)
+        return if (locInfo != null) {
+            val lat = locInfo.latitude
+            val lon = locInfo.longitude
             try {
                 val forecast = WeatherClient.forecastService.getForecast(lat, lon)
                 val cw = forecast.current_weather
@@ -57,12 +51,12 @@ class AriaWeatherNotificationReceiver : BroadcastReceiver() {
                 val condition = mapWeatherCode(cw?.weathercode)
                 val wind = cw?.windspeed?.toInt() ?: 10
 
-                var locationName = getCityNameFromCoords(context, lat, lon) ?: "Your Location"
-
+                val locationName = locInfo.city ?: locInfo.locality ?: "Your Location"
                 "☀️ $locationName: $condition, $temp°C, Wind $wind km/h"
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching forecast for coordinates: ${e.message}", e)
-                "☀️ Your Location: Clear sky, 25°C"
+                val fallbackLabel = locInfo.city ?: locInfo.locality ?: "Your Location"
+                "☀️ $fallbackLabel: Clear sky, 25°C"
             }
         } else {
             // Fallback to default city search if location permission missing or location unavailable
@@ -87,60 +81,6 @@ class AriaWeatherNotificationReceiver : BroadcastReceiver() {
             }
         } catch (e: Exception) {
             "☀️ $city: Clear sky, 25°C"
-        }
-    }
-
-    private fun getDeviceLocation(context: Context): Pair<Double, Double>? {
-        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
-        val hasFine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val hasCoarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-        if (!hasFine && !hasCoarse) return null
-
-        try {
-            val gpsLoc = if (hasFine && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            } else null
-
-            val netLoc = if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            } else null
-
-            val bestLoc = gpsLoc ?: netLoc
-            if (bestLoc != null) {
-                return Pair(bestLoc.latitude, bestLoc.longitude)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to get device location", e)
-        }
-        return null
-    }
-
-    private fun getCityNameFromCoords(context: Context, lat: Double, lon: Double): String? {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                val geocoder = Geocoder(context, Locale.getDefault())
-                var resultName: String? = null
-                geocoder.getFromLocation(lat, lon, 1) { addresses ->
-                    if (addresses.isNotEmpty()) {
-                        val addr = addresses[0]
-                        resultName = addr.locality ?: addr.subAdminArea ?: addr.adminArea
-                    }
-                }
-                resultName
-            } else {
-                @Suppress("DEPRECATION")
-                val geocoder = Geocoder(context, Locale.getDefault())
-                @Suppress("DEPRECATION")
-                val addresses = geocoder.getFromLocation(lat, lon, 1)
-                if (!addresses.isNullOrEmpty()) {
-                    val addr = addresses[0]
-                    addr.locality ?: addr.subAdminArea ?: addr.adminArea
-                } else null
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Geocoder lookup failed: ${e.message}")
-            null
         }
     }
 

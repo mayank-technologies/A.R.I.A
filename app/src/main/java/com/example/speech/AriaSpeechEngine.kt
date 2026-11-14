@@ -63,28 +63,26 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
             v.startsWith("YOUR_", ignoreCase = true)
     }
 
-    private var voiceId = try {
+    private var voiceId: String = run {
         val prefs = context.getSharedPreferences("aria_prefs", Context.MODE_PRIVATE)
         val savedVoiceId = prefs.getString("elevenlabs_voice_id", "") ?: ""
-        val buildConfigVoiceId = try {
-            BuildConfig::class.java.getField("ELEVENLABS_VOICE_ID").get(null) as? String ?: ""
-        } catch (_: Exception) { "" }
+        val buildConfigVoiceId = BuildConfig.ELEVENLABS_VOICE_ID.trim()
         val legacyFemaleIds = setOf("21m00Tcm4TlvDq8ikWAM", "EXAVITQu4vr4xnSDxMaL")
         when {
-            !isPlaceholderValue(buildConfigVoiceId) && buildConfigVoiceId !in legacyFemaleIds -> buildConfigVoiceId.trim()
+            !isPlaceholderValue(buildConfigVoiceId) && buildConfigVoiceId !in legacyFemaleIds -> buildConfigVoiceId
             !isPlaceholderValue(savedVoiceId) && savedVoiceId !in legacyFemaleIds -> savedVoiceId.trim()
             else -> {
-                prefs.edit().putString("elevenlabs_voice_id", "pNInz6obpgDQGcFmaJgB").apply()
-                "pNInz6obpgDQGcFmaJgB"
+                prefs.edit().putString("elevenlabs_voice_id", DEFAULT_MALE_VOICE_ID).apply()
+                DEFAULT_MALE_VOICE_ID
             }
         }
-    } catch (e: Exception) {
-        "pNInz6obpgDQGcFmaJgB"
     }
-    private var apiKey = try {
-        val raw = BuildConfig::class.java.getField("ELEVENLABS_API_KEY").get(null) as? String ?: ""
-        if (isPlaceholderValue(raw)) "" else raw.trim()
-    } catch (e: Exception) { "" }
+
+    private var apiKey: String = BuildConfig.ELEVENLABS_API_KEY.trim().let { raw ->
+        if (isPlaceholderValue(raw)) "" else raw
+    }
+
+    fun getActiveVoiceId(): String = voiceId
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -166,7 +164,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                 Log.e("AriaSpeechEngine", "Could not set custom male voice: ${e.message}")
             }
             // If emulator/device only ships a female/neutral default voice, 0.78f drops it cleanly into male baritone register
-            nativeTts?.setPitch(if (selectedMaleVoice) 0.92f else 0.78f)
+            nativeTts?.setPitch(if (selectedMaleVoice) 0.90f else 0.78f)
 
             nativeTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
@@ -346,7 +344,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     }
 
     /**
-     * Calls ElevenLabs Text-to-Speech API (v1/text-to-speech) with Rachel Neural Voice.
+     * Calls ElevenLabs Text-to-Speech API (v1/text-to-speech) using BuildConfig.ELEVENLABS_VOICE_ID (Adam male voice).
      * Uses eleven_multilingual_v2 model for realistic natural speech in Hindi/English.
      */
     private suspend fun fetchElevenLabsAudio(text: String, key: String): File? = withContext(Dispatchers.IO) {
@@ -610,6 +608,8 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     }
 
     companion object {
+        const val DEFAULT_MALE_VOICE_ID = "pNInz6obpgDQGcFmaJgB" // Adam (Male)
+
         data class WakeWordParseResult(
             val hasWakeWord: Boolean,
             val isOnlyWakeWord: Boolean,

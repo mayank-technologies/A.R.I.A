@@ -10,6 +10,7 @@ import android.util.Base64
 import android.util.Log
 import com.example.BuildConfig
 import com.example.assistant.DeviceClockHelper
+import com.example.claude.ClaudeReasoningEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -115,6 +116,9 @@ class GeminiLiveVoiceManager(private val context: Context) {
 
     private val _liveTranscript = MutableStateFlow("")
     val liveTranscript: StateFlow<String> = _liveTranscript.asStateFlow()
+
+    private val _userInputTranscript = MutableStateFlow("")
+    val userInputTranscript: StateFlow<String> = _userInputTranscript.asStateFlow()
 
     private val _detectedLanguage = MutableStateFlow("Auto (Bilingual)")
     val detectedLanguage: StateFlow<String> = _detectedLanguage.asStateFlow()
@@ -275,6 +279,19 @@ class GeminiLiveVoiceManager(private val context: Context) {
                     logDebug = true,
                     source = "GeminiLiveHandshake"
                 )
+                val claudeEnabled = ClaudeReasoningEngine.hasValidApiKey()
+                val claudeRoleInstruction = if (claudeEnabled) {
+                    """
+                                
+                                CLAUDE REASONING BRAIN DELEGATION (ACTIVE):
+                                - You (Gemini Live Charon) are ARC's real-time voice ear & warm expressive male voice.
+                                - For complex user commands, multi-step reasoning, contact/app selection, or general Q&A, FIRST call `consultClaudeBrain(userQuery)` with the user's exact request so Claude decides the reasoning/action.
+                                - When `consultClaudeBrain` returns `spokenResponse` (`useGeminiFallback: false`), speak that response naturally in your Charon voice in the user's language (do NOT re-execute tools Claude already ran).
+                                - If `consultClaudeBrain` returns `useGeminiFallback: true` or fails, seamlessly handle the request yourself using your own built-in tools and reasoning so ARC never stalls.
+                    """.trimIndent()
+                } else {
+                    ""
+                }
                 val systemInstruction = JSONObject().apply {
                     val parts = JSONArray().apply {
                         put(JSONObject().apply {
@@ -284,7 +301,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                 
                                 VOICE DELIVERY & EMOTIONAL EXPRESSION:
                                 Speak naturally with warmth and subtle emotional expression — not flat or robotic, vary pitch/pace based on context (calm for info, energetic for greetings).
-                                Sound like a genuinely attentive human companion: add natural conversational cadence, gentle emphasis on key words, and warm reassurance when helping. Use natural masculine Hindi/Hinglish grammar when speaking Hindi or Hinglish (e.g., "kar raha hu", "bata raha hu").
+                                Sound like a genuinely attentive human companion: add natural conversational cadence, gentle emphasis on key words, and warm reassurance when helping. Use natural masculine Hindi/Hinglish grammar when speaking Hindi or Hinglish (e.g., "kar raha hu", "bata raha hu", "khol raha hu").
                                 
                                 CRITICAL MULTI-LANGUAGE INSTRUCTIONS:
                                 1. Automatically detect the user's spoken language: Hindi, English, Hinglish, Marathi, Gujarati, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi, or Urdu.
@@ -293,12 +310,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                 4. Keep spoken responses concise, articulate, and respectful (2-3 sentences max).
                                 
                                 FUNCTION-CALLING & CALL CONFIRMATION RULES:
-                                1. Use the provided tools (openWhatsApp, openApp, openUrl, makeCall, callContact, getCurrentDateTime, controlHardware, toggleSecurityGuard, readWhatsAppNotifications, readScreenVision) whenever user expresses an action intent or asks the current time/date.
-                                2. ALWAYS call getCurrentDateTime before stating the current time or date so you never guess or give a stale/wrong time.
+                                1. Use the provided tools (consultClaudeBrain, openGoogleMapsRoute, assistRideBooking, assistShoppingSearch, openWhatsApp, openApp, openUrl, makeCall, callContact, getCurrentDateTime, controlHardware, toggleSecurityGuard, readWhatsAppNotifications, readScreenVision) whenever user expresses an action intent or asks the current time/date.
+                                2. ALWAYS call getCurrentDateTime (or consultClaudeBrain) before stating the current time or date so you never guess or give a stale/wrong time.
                                 3. NEVER execute arbitrary code. ONLY trigger the declared tools.
                                 4. When calling someone: Verbally acknowledge immediately (e.g. "Calling Mom, Boss", "Rahul ko call laga raha hu") before or during the tool call.
                                 5. If a tool fails or reports an error, state the TRUTH to the user politely. NEVER pretend an action succeeded when it failed.
-                                6. If contact matching yields multiple possibilities, explicitly ask user for clarification (e.g., 'kaunsa Rahul - Sharma ya Verma?').
+                                6. RIDE & SHOPPING HONESTY RULE: For rides (`assistRideBooking`), if the user didn't pick Bike / Car 4-seater / 6-seater, ask first. For both rides and shopping (`assistShoppingSearch`), NEVER say "booking confirm ho gayi" or "order ho gaya" — always tell the user clearly that final confirm and payment must be done by them inside the app.
+                                7. If contact matching yields multiple possibilities, explicitly ask user for clarification (e.g., 'kaunsa Rahul - Sharma ya Verma?').$claudeRoleInstruction
                             """.trimIndent())
                         })
                     }
@@ -415,7 +433,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 return
             }
 
-            // 1. Check for Server Turn Content (Audio chunks + Live Transcript)
+            // 1. Check for Input/Output Transcriptions & Server Turn Content
+            val rootInputTranscript = root.optJSONObject("inputTranscription")?.optString("text", "")
+            if (!rootInputTranscript.isNullOrBlank()) {
+                _userInputTranscript.value = rootInputTranscript
+                Log.d(TAG, "Gemini Input Transcription: $rootInputTranscript")
+            }
+
             val rootTranscription = root.optJSONObject("outputTranscription")?.optString("text", "")
             if (!rootTranscription.isNullOrBlank()) {
                 _liveTranscript.value = rootTranscription
@@ -424,6 +448,12 @@ class GeminiLiveVoiceManager(private val context: Context) {
 
             val serverContent = root.optJSONObject("serverContent")
             if (serverContent != null) {
+                val serverInputTranscript = serverContent.optJSONObject("inputTranscription")?.optString("text", "")
+                if (!serverInputTranscript.isNullOrBlank()) {
+                    _userInputTranscript.value = serverInputTranscript
+                    Log.d(TAG, "Gemini Input Transcription: $serverInputTranscript")
+                }
+
                 val serverTranscription = serverContent.optJSONObject("outputTranscription")?.optString("text", "")
                 if (!serverTranscription.isNullOrBlank()) {
                     _liveTranscript.value = serverTranscription
