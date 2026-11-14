@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -48,7 +49,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -60,16 +60,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -84,6 +85,7 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.components.ArcBrandLogo
 import com.example.ui.theme.CarbonBlack
 import com.example.ui.theme.CobaltTech
+import com.example.ui.theme.DarkTitanium
 import com.example.ui.theme.DeepSpace
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricCyan
@@ -100,17 +102,18 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * Futuristic JARVIS / ARC HUD Onboarding Screen:
- * - Background: DeepSpace-to-CarbonBlack canvas with subtle radial energy bloom,
- *   blueprint HUD grid, and softly drifting cyan/blue micro-particles.
- * - Top Brand Emblem: Sharp geometric circuit-"A" vector logo framed inside a
- *   clean chamfered dark glassmorphism badge (replaces old radar-ring / orb).
- * - Typography Hierarchy: Telemetry subtitle -> Bold primary prompt with cyan
- *   text-shadow glow -> Muted readable description with generous breathing space.
- * - Input Field: Unified translucent glassmorphism card with thin glowing cyan
- *   border and glowing accent Person badge (no harsh double inner borders).
- * - CTA Button: Horizontal ElectricCyan -> HologramBlue -> CobaltTech gradient
- *   button with interactive hover/press glow amplification.
+ * Futuristic ARC Tech-HUD Onboarding Screen:
+ * - Background ([OnboardingHudBackdrop]): DeepSpace-to-CarbonBlack gradient with subtle radial
+ *   energy blooms, faint 44.dp HUD grid lines, and gentle drifting cyan/blue micro-particles.
+ * - Top Brand Emblem ([OnboardingCoreHeader]): Sharp geometric circuit-"A" logo ([ArcBrandLogo])
+ *   framed in a multi-layer frosted glassmorphism badge with soft outer cyan/blue glow and
+ *   twinkling shimmer particles matching the Voice HUD avatar palette (replaces orange target).
+ * - Typography Hierarchy: Wide letter-spaced telemetry subtitle -> Bold heading with ElectricCyan
+ *   text-shadow glow -> Muted description with breathable spacing above and below.
+ * - Input Field: Unified translucent glassmorphism card with 22.dp smooth corners, glowing thin
+ *   cyan border (brightening on focus), and an accented glowing Person icon badge.
+ * - CTA Button ([OnboardingGlowButton]): ElectricCyan -> HologramBlue -> CobaltTech gradient pill
+ *   with matching 22.dp corners and amplified outer/border glow on hover and press.
  */
 @Composable
 fun OnboardingScreen(
@@ -143,10 +146,10 @@ fun OnboardingScreen(
     ) {
         val isCompactHeight = maxHeight < 600.dp
 
-        // 1. Subtle Futuristic Tech-HUD Grid + Radial Bloom + Drifting Particles Background
+        // 1. Subtle Tech-HUD Grid + Dual Radial Blooms + Drifting Micro-Particles Backdrop
         OnboardingHudBackdrop(modifier = Modifier.fillMaxSize())
 
-        // 2. Responsive Centered HUD Content Column with Safe Area & Keyboard Insets
+        // 2. Centered, Breathable HUD Content Column respecting Safe Insets & Keyboard
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -158,62 +161,63 @@ fun OnboardingScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(
                     horizontal = 26.dp,
-                    vertical = if (isCompactHeight) 16.dp else 28.dp
+                    vertical = if (isCompactHeight) 18.dp else 32.dp
                 )
         ) {
-            // Top Brand Emblem: Sharp Geometric Circuit-"A" Logo
+            // Top Icon Widget: Frosted Glassmorphism Frame + Outer Glow + Shimmer Particles + Geometric 'A'
             OnboardingCoreHeader(
+                outerSize = if (isCompactHeight) 128.dp else 156.dp,
                 badgeSize = if (isCompactHeight) 104.dp else 124.dp,
-                logoSize = if (isCompactHeight) 84.dp else 102.dp
+                logoSize = if (isCompactHeight) 84.dp else 100.dp
             )
 
-            Spacer(modifier = Modifier.height(if (isCompactHeight) 20.dp else 34.dp))
+            Spacer(modifier = Modifier.height(if (isCompactHeight) 20.dp else 36.dp))
 
-            // Title Hierarchy — Level 1: Subtle Letter-Spaced Telemetry Label
+            // Title Hierarchy — Level 1: Subtle Letter-Spaced Telemetry Subtitle
             Text(
                 text = "ARC SYSTEM INITIALIZATION",
                 color = HologramBlue.copy(alpha = 0.85f),
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
-                letterSpacing = 3.2.sp,
+                letterSpacing = 3.4.sp,
                 textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Title Hierarchy — Level 2: Bold Primary Heading with Subtle Cyan Accent Glow
-            Text(
-                text = "What should I call you?",
-                style = TextStyle(
-                    color = TextPrimary,
-                    fontSize = if (isCompactHeight) 25.sp else 28.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 0.3.sp,
-                    textAlign = TextAlign.Center,
-                    shadow = Shadow(
-                        color = ElectricCyan.copy(alpha = 0.45f),
-                        offset = Offset(0f, 0f),
-                        blurRadius = 20f
-                    )
-                )
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Title Hierarchy — Level 3: Muted Description with Breathing Room
+            // Title Hierarchy — Level 2: Bold Primary Heading with Cyan Accent Text-Shadow Glow
+            Text(
+                text = "What should I call you?",
+                style = TextStyle(
+                    color = TextPrimary,
+                    fontSize = if (isCompactHeight) 25.sp else 29.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.3.sp,
+                    textAlign = TextAlign.Center,
+                    shadow = Shadow(
+                        color = ElectricCyan.copy(alpha = 0.48f),
+                        offset = Offset(0f, 0f),
+                        blurRadius = 22f
+                    )
+                )
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Title Hierarchy — Level 3: Muted Readable Description with Extra Vertical Breathing Room
             Text(
                 text = "Enter your name to personalize your AI voice assistant experience.",
                 color = TextSecondary,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center,
                 lineHeight = 21.sp,
-                modifier = Modifier.padding(horizontal = 18.dp)
+                modifier = Modifier.padding(horizontal = 16.dp)
             )
 
-            Spacer(modifier = Modifier.height(if (isCompactHeight) 24.dp else 38.dp))
+            Spacer(modifier = Modifier.height(if (isCompactHeight) 26.dp else 40.dp))
 
-            // 3. Glassmorphism Name Input Card (Translucent Frost + Thin Glowing Cyan Border)
+            // 3. Glassmorphism Name Input Card (Frosted Translucent Card + Thin Glowing Cyan Border)
             val inputBorderColor by animateColorAsState(
                 targetValue = when {
                     errorMessage != null -> WarningAmber
@@ -224,51 +228,71 @@ fun OnboardingScreen(
                 label = "onboarding_input_border"
             )
             val inputGlowAlpha by animateFloatAsState(
-                targetValue = if (isInputFocused) 0.28f else 0.10f,
+                targetValue = if (isInputFocused) 0.32f else 0.12f,
                 animationSpec = tween(durationMillis = 220),
                 label = "onboarding_input_glow"
             )
 
+            val inputShape = RoundedCornerShape(22.dp)
+
             Column(modifier = Modifier.fillMaxWidth()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .drawBehind {
-                            // Subtle outer ambient neon border bloom
-                            drawRoundRect(
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    // Diffused behind-card frosted cyan/blue glow layer (Gaussian blur on Android 12+)
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .then(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Modifier.blur(14.dp) else Modifier)
+                            .background(
                                 brush = Brush.horizontalGradient(
                                     colors = listOf(
-                                        ElectricCyan.copy(alpha = inputGlowAlpha),
-                                        HologramBlue.copy(alpha = inputGlowAlpha * 0.85f),
-                                        ElectricCyan.copy(alpha = inputGlowAlpha)
+                                        ElectricCyan.copy(alpha = inputGlowAlpha * 0.65f),
+                                        HologramBlue.copy(alpha = inputGlowAlpha * 0.50f),
+                                        ElectricCyan.copy(alpha = inputGlowAlpha * 0.65f)
                                     )
                                 ),
-                                cornerRadius = CornerRadius(24.dp.toPx(), 24.dp.toPx()),
-                                style = Stroke(width = 6.dp.toPx())
+                                shape = inputShape
                             )
-                        }
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color(0x990D182E),
-                                    GlassBackground
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(inputShape)
+                            .background(
+                                // Frosted multi-stop translucent glass using theme surface tokens
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        DarkTitanium.copy(alpha = 0.80f),
+                                        GlassBackground
+                                    )
                                 )
                             )
-                        )
-                        .border(
-                            width = 1.2.dp,
-                            brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    inputBorderColor,
-                                    HologramBlue.copy(alpha = if (isInputFocused) 0.9f else 0.45f),
-                                    inputBorderColor
+                            .drawBehind {
+                                // Subtle top-edge frosted glass specular sheen
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.07f),
+                                            Color.Transparent
+                                        ),
+                                        startY = 0f,
+                                        endY = size.height * 0.45f
+                                    )
                                 )
-                            ),
-                            shape = RoundedCornerShape(20.dp)
-                        )
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
+                            }
+                            .border(
+                                width = 1.2.dp,
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(
+                                        inputBorderColor,
+                                        HologramBlue.copy(alpha = if (isInputFocused) 0.92f else 0.45f),
+                                        inputBorderColor
+                                    )
+                                ),
+                                shape = inputShape
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
                     TextField(
                         value = nameText,
                         onValueChange = {
@@ -283,7 +307,7 @@ fun OnboardingScreen(
                             )
                         },
                         leadingIcon = {
-                            // Glowing Accent Badge around the Person Icon
+                            // Accent-glowing Person badge inside the glassmorphism field
                             Box(
                                 modifier = Modifier
                                     .size(38.dp)
@@ -291,18 +315,18 @@ fun OnboardingScreen(
                                         drawCircle(
                                             brush = Brush.radialGradient(
                                                 colors = listOf(
-                                                    ElectricCyan.copy(alpha = if (isInputFocused) 0.36f else 0.22f),
+                                                    ElectricCyan.copy(alpha = if (isInputFocused) 0.42f else 0.24f),
                                                     Color.Transparent
                                                 )
                                             ),
-                                            radius = size.minDimension * 0.72f
+                                            radius = size.minDimension * 0.76f
                                         )
                                     }
                                     .clip(CircleShape)
-                                    .background(ElectricCyan.copy(alpha = 0.12f))
+                                    .background(ElectricCyan.copy(alpha = 0.13f))
                                     .border(
                                         width = 1.dp,
-                                        color = ElectricCyan.copy(alpha = 0.45f),
+                                        color = ElectricCyan.copy(alpha = if (isInputFocused) 0.75f else 0.45f),
                                         shape = CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
@@ -339,6 +363,7 @@ fun OnboardingScreen(
                             .onFocusChanged { isInputFocused = it.isFocused }
                             .testTag("onboarding_name_input")
                     )
+                    }
                 }
 
                 AnimatedVisibility(
@@ -351,14 +376,14 @@ fun OnboardingScreen(
                         color = WarningAmber,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(start = 10.dp, top = 8.dp)
+                        modifier = Modifier.padding(start = 12.dp, top = 8.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(if (isCompactHeight) 20.dp else 30.dp))
+            Spacer(modifier = Modifier.height(if (isCompactHeight) 22.dp else 32.dp))
 
-            // 4. Gradient Glow CTA Button ("GET STARTED ->") matching HUD rounded geometry
+            // 4. Gradient Glow Primary CTA Button ("GET STARTED ->")
             OnboardingGlowButton(
                 text = "GET STARTED",
                 onClick = { submit() },
@@ -370,57 +395,161 @@ fun OnboardingScreen(
     }
 }
 
+private data class HeaderSparkle(
+    val angleRad: Float,
+    val radiusFraction: Float,
+    val phaseOffset: Float,
+    val sizeDp: Float,
+    val isCrosshair: Boolean,
+    val isCyan: Boolean
+)
+
 /**
- * Top Futuristic ARC Geometric Logo Header:
- * Uses the sharp angular circuit-"A" brand emblem ([ArcBrandLogo]) framed inside
- * a sleek dark obsidian glassmorphic rounded-square badge with subtle corner glow—
- * intentionally avoiding circular radar rings or particle-orb repetition.
+ * Top Futuristic ARC Logo Header Widget:
+ * - Retains the sharp geometric circuit-"A" [ArcBrandLogo] inside its cyan/blue glass frame.
+ * - Softens the outer radial glow into a multi-stop atmospheric halo and adds avatar-style
+ *   drifting micro-particles + subtle "+" crosshair shimmers around the glass frame.
  */
 @Composable
 private fun OnboardingCoreHeader(
+    outerSize: Dp = 156.dp,
     badgeSize: Dp = 124.dp,
-    logoSize: Dp = 102.dp
+    logoSize: Dp = 100.dp
 ) {
     val cardShape = RoundedCornerShape(28.dp)
+    val sparkles = remember {
+        val rng = Random(4242)
+        List(16) { idx ->
+            HeaderSparkle(
+                angleRad = (idx.toFloat() / 16f) * 2f * PI.toFloat() + (rng.nextFloat() - 0.5f) * 0.22f,
+                radiusFraction = 0.415f + rng.nextFloat() * 0.085f,
+                phaseOffset = rng.nextFloat() * 2f * PI.toFloat(),
+                sizeDp = 1.2f + rng.nextFloat() * 1.4f,
+                isCrosshair = idx % 4 == 0,
+                isCyan = idx % 2 == 0
+            )
+        }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "onboarding_header_shimmer")
+    val glowPulse by infiniteTransition.animateFloat(
+        initialValue = 0.88f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "header_glow_pulse"
+    )
+    val shimmerPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 7000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "header_shimmer_phase"
+    )
 
     Box(
-        modifier = Modifier
-            .size(badgeSize)
-            .clip(cardShape)
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        Color(0x8808142B),
-                        GlassBackground
-                    )
-                )
-            )
-            .border(
-                width = 1.25.dp,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        ElectricCyan.copy(alpha = 0.72f),
-                        HologramBlue.copy(alpha = 0.25f),
-                        ElectricCyan.copy(alpha = 0.62f)
-                    )
-                ),
-                shape = cardShape
-            )
-            .testTag("onboarding_arc_logo"),
+        modifier = Modifier.size(outerSize),
         contentAlignment = Alignment.Center
     ) {
-        ArcBrandLogo(
-            size = logoSize,
-            animatePulse = true,
-            showAmbientGlow = true
-        )
+        // Soft diffused outer cyan/blue halo + avatar-style particle & crosshair shimmer
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.0f to ElectricCyan.copy(alpha = 0.17f * glowPulse),
+                        0.48f to HologramBlue.copy(alpha = 0.10f * glowPulse),
+                        0.78f to ElectricBlue.copy(alpha = 0.04f),
+                        1.0f to Color.Transparent
+                    ),
+                    center = center,
+                    radius = size.minDimension * 0.52f * glowPulse
+                ),
+                radius = size.minDimension * 0.52f * glowPulse,
+                center = center
+            )
+
+            sparkles.forEach { sp ->
+                val drift = shimmerPhase + sp.phaseOffset
+                val alpha = 0.16f + 0.52f * (0.5f + 0.5f * sin(drift))
+                val r = size.minDimension * sp.radiusFraction + sin(drift * 0.65f) * 2.2.dp.toPx()
+                val px = center.x + cos(sp.angleRad) * r
+                val py = center.y + sin(sp.angleRad) * r
+                val dotColor = if (sp.isCyan) ElectricCyan else HologramBlue
+                val radiusPx = sp.sizeDp.dp.toPx()
+
+                if (sp.isCrosshair) {
+                    val arm = radiusPx * 2.1f
+                    drawLine(
+                        color = Color.White.copy(alpha = alpha * 0.85f),
+                        start = Offset(px - arm, py),
+                        end = Offset(px + arm, py),
+                        strokeWidth = 0.9.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                    drawLine(
+                        color = dotColor.copy(alpha = alpha),
+                        start = Offset(px, py - arm),
+                        end = Offset(px, py + arm),
+                        strokeWidth = 0.9.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                } else {
+                    drawCircle(
+                        color = dotColor.copy(alpha = alpha),
+                        radius = radiusPx,
+                        center = Offset(px, py)
+                    )
+                }
+            }
+        }
+
+        // Frosted glassmorphism rounded-square badge framing the sharp geometric circuit-"A"
+        Box(
+            modifier = Modifier
+                .size(badgeSize)
+                .clip(cardShape)
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            DarkTitanium.copy(alpha = 0.76f),
+                            GlassBackground
+                        )
+                    )
+                )
+                .border(
+                    width = 1.25.dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            ElectricCyan.copy(alpha = 0.78f),
+                            HologramBlue.copy(alpha = 0.28f),
+                            ElectricCyan.copy(alpha = 0.65f)
+                        )
+                    ),
+                    shape = cardShape
+                )
+                .testTag("onboarding_arc_logo"),
+            contentAlignment = Alignment.Center
+        ) {
+            ArcBrandLogo(
+                size = logoSize,
+                animatePulse = true,
+                showAmbientGlow = true
+            )
+        }
     }
 }
 
 /**
  * Gradient Glow Primary Action Button:
- * Features an ElectricCyan -> HologramBlue -> CobaltTech gradient, rounded 20.dp corners
- * matching the glassmorphism card above, and dynamic glow amplification on hover/press.
+ * - Replaces the flat solid cyan button with an ElectricCyan -> HologramBlue -> CobaltTech gradient.
+ * - Matches the 22.dp rounded geometry of the glassmorphism input card above.
+ * - Amplifies outer aura thickness, opacity, and rim highlight dynamically on hover and press.
  */
 @Composable
 private fun OnboardingGlowButton(
@@ -434,8 +563,8 @@ private fun OnboardingGlowButton(
 
     val glowStrength by animateFloatAsState(
         targetValue = when {
-            isPressed -> 0.62f
-            isHovered -> 0.48f
+            isPressed -> 0.66f
+            isHovered -> 0.50f
             else -> 0.26f
         },
         animationSpec = tween(durationMillis = 160),
@@ -447,13 +576,13 @@ private fun OnboardingGlowButton(
         label = "button_press_scale"
     )
 
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(22.dp)
 
     Box(
         modifier = modifier
             .scale(pressScale)
             .drawBehind {
-                // Soft outer gradient halo whose intensity intensifies on hover/press
+                // Soft outer accent halo amplifying smoothly on hover or press
                 drawRoundRect(
                     brush = Brush.horizontalGradient(
                         colors = listOf(
@@ -462,8 +591,8 @@ private fun OnboardingGlowButton(
                             CobaltTech.copy(alpha = glowStrength * 0.8f)
                         )
                     ),
-                    cornerRadius = CornerRadius(24.dp.toPx(), 24.dp.toPx()),
-                    style = Stroke(width = if (isPressed || isHovered) 10.dp.toPx() else 6.dp.toPx())
+                    cornerRadius = CornerRadius(26.dp.toPx(), 26.dp.toPx()),
+                    style = Stroke(width = if (isPressed || isHovered) 11.dp.toPx() else 6.dp.toPx())
                 )
             }
             .height(56.dp)
@@ -480,7 +609,7 @@ private fun OnboardingGlowButton(
             .border(
                 BorderStroke(
                     width = 1.dp,
-                    color = Color.White.copy(alpha = if (isPressed || isHovered) 0.55f else 0.30f)
+                    color = Color.White.copy(alpha = if (isPressed || isHovered) 0.58f else 0.30f)
                 ),
                 shape = shape
             )
@@ -523,9 +652,9 @@ private data class HudStar(
 
 /**
  * Subtle Tech-HUD Backdrop:
- * Combines a soft centered radial glow, faint coordinate grid lines,
- * and gentle ambient micro-particles so the background matches the avatar HUD aesthetic
- * without competing with foreground readability.
+ * Combines top/bottom atmospheric radial energy blooms, faint 44.dp blueprint grid lines,
+ * and low-opacity drifting micro-particles consistent with the Voice HUD canvas without
+ * distracting from foreground controls.
  */
 @Composable
 private fun OnboardingHudBackdrop(modifier: Modifier = Modifier) {
@@ -557,8 +686,7 @@ private fun OnboardingHudBackdrop(modifier: Modifier = Modifier) {
         val w = size.width
         val h = size.height
 
-        // Top-center subtle radial glow behind the HUD core
-        val glowCenter = Offset(w * 0.5f, h * 0.28f)
+        // Top-center subtle radial glow behind the logo header
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
@@ -566,12 +694,24 @@ private fun OnboardingHudBackdrop(modifier: Modifier = Modifier) {
                     ElectricBlue.copy(alpha = 0.05f),
                     Color.Transparent
                 ),
-                center = glowCenter,
+                center = Offset(w * 0.5f, h * 0.26f),
                 radius = maxOf(w, h) * 0.55f
             )
         )
 
-        // Subtle blueprint HUD grid texture
+        // Subtle secondary ambient floor glow near CTA button
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    CobaltTech.copy(alpha = 0.07f),
+                    Color.Transparent
+                ),
+                center = Offset(w * 0.5f, h * 0.86f),
+                radius = maxOf(w, h) * 0.45f
+            )
+        )
+
+        // Faint blueprint HUD coordinate grid
         val stepPx = 44.dp.toPx()
         val gridLineColor = ElectricCyan.copy(alpha = 0.032f)
         var x = stepPx
