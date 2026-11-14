@@ -69,11 +69,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -84,8 +81,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.AssistantStatus
-import com.example.ui.components.ParticleAvatar3D
+import com.example.ui.components.ArcBrandLogo
 import com.example.ui.theme.CarbonBlack
 import com.example.ui.theme.CobaltTech
 import com.example.ui.theme.DeepSpace
@@ -107,8 +103,8 @@ import kotlin.random.Random
  * Futuristic JARVIS / ARC HUD Onboarding Screen:
  * - Background: DeepSpace-to-CarbonBlack canvas with subtle radial energy bloom,
  *   blueprint HUD grid, and softly drifting cyan/blue micro-particles.
- * - Top Core Icon: Cyan/blue ParticleAvatar3D orb framed inside an animated
- *   glassmorphism HUD ring with outer neon aura (replaces the old orange target).
+ * - Top Brand Emblem: Sharp geometric circuit-"A" vector logo framed inside a
+ *   clean chamfered dark glassmorphism badge (replaces old radar-ring / orb).
  * - Typography Hierarchy: Telemetry subtitle -> Bold primary prompt with cyan
  *   text-shadow glow -> Muted readable description with generous breathing space.
  * - Input Field: Unified translucent glassmorphism card with thin glowing cyan
@@ -165,11 +161,10 @@ fun OnboardingScreen(
                     vertical = if (isCompactHeight) 16.dp else 28.dp
                 )
         ) {
-            // Top Icon: Cyan/Blue Glass-Morphism Ring + Particle Shimmer Core
+            // Top Brand Emblem: Sharp Geometric Circuit-"A" Logo
             OnboardingCoreHeader(
-                outerSize = if (isCompactHeight) 116.dp else 144.dp,
-                ringSize = if (isCompactHeight) 92.dp else 112.dp,
-                orbSize = if (isCompactHeight) 84.dp else 104.dp
+                badgeSize = if (isCompactHeight) 104.dp else 124.dp,
+                logoSize = if (isCompactHeight) 84.dp else 102.dp
             )
 
             Spacer(modifier = Modifier.height(if (isCompactHeight) 20.dp else 34.dp))
@@ -376,130 +371,49 @@ fun OnboardingScreen(
 }
 
 /**
- * Top Futuristic Cyan/Blue HUD Core Header:
- * Replaces the earlier orange target ring with an ambient cyan/blue halo,
- * rotating HUD glass-morphism bracket ring, and the dense ParticleAvatar3D shimmer orb.
+ * Top Futuristic ARC Geometric Logo Header:
+ * Uses the sharp angular circuit-"A" brand emblem ([ArcBrandLogo]) framed inside
+ * a sleek dark obsidian glassmorphic rounded-square badge with subtle corner glow—
+ * intentionally avoiding circular radar rings or particle-orb repetition.
  */
 @Composable
 private fun OnboardingCoreHeader(
-    outerSize: Dp = 144.dp,
-    ringSize: Dp = 112.dp,
-    orbSize: Dp = 104.dp
+    badgeSize: Dp = 124.dp,
+    logoSize: Dp = 102.dp
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "onboarding_core_ring")
-    val ringRotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 16000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "ring_rotation"
-    )
-    val outerGlowPulse by infiniteTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "outer_glow_pulse"
-    )
+    val cardShape = RoundedCornerShape(28.dp)
 
     Box(
-        modifier = Modifier.size(outerSize),
-        contentAlignment = Alignment.Center
-    ) {
-        // Soft outer cyan/blue glass-ring illumination + rotating segmented HUD ring
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val ringRadius = size.minDimension * 0.42f
-
-            // Subtle ambient radial halo behind the glass ring
-            drawCircle(
-                brush = Brush.radialGradient(
+        modifier = Modifier
+            .size(badgeSize)
+            .clip(cardShape)
+            .background(
+                Brush.linearGradient(
                     colors = listOf(
-                        ElectricCyan.copy(alpha = 0.24f * outerGlowPulse),
-                        ElectricBlue.copy(alpha = 0.12f),
-                        Color.Transparent
-                    ),
-                    center = center,
-                    radius = size.minDimension * 0.50f * outerGlowPulse
-                ),
-                radius = size.minDimension * 0.50f * outerGlowPulse,
-                center = center
-            )
-
-            // Subtle dashed orbital telemetry ring
-            drawCircle(
-                color = HologramBlue.copy(alpha = 0.24f),
-                radius = ringRadius * 1.12f,
-                center = center,
-                style = Stroke(
-                    width = 1.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 10f), 0f)
-                )
-            )
-
-            // Rotating precision cyan/blue HUD arc segments
-            rotate(degrees = ringRotation, pivot = center) {
-                val arcSize = Size(ringRadius * 2f, ringRadius * 2f)
-                val arcTopLeft = Offset(center.x - ringRadius, center.y - ringRadius)
-                drawArc(
-                    brush = Brush.sweepGradient(
-                        listOf(ElectricCyan, HologramBlue, Color.Transparent, ElectricCyan)
-                    ),
-                    startAngle = 0f,
-                    sweepAngle = 110f,
-                    useCenter = false,
-                    topLeft = arcTopLeft,
-                    size = arcSize,
-                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                )
-                drawArc(
-                    color = ElectricCyan.copy(alpha = 0.7f),
-                    startAngle = 180f,
-                    sweepAngle = 110f,
-                    useCenter = false,
-                    topLeft = arcTopLeft,
-                    size = arcSize,
-                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                )
-            }
-        }
-
-        // Translucent Glass-Morphism Ring framing the Shimmer Particle Sphere
-        Box(
-            modifier = Modifier
-                .size(ringSize)
-                .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            Color(0x550A1B33),
-                            GlassBackground
-                        )
+                        Color(0x8808142B),
+                        GlassBackground
                     )
                 )
-                .border(
-                    width = 1.25.dp,
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            ElectricCyan.copy(alpha = 0.75f),
-                            HologramBlue.copy(alpha = 0.35f),
-                            ElectricCyan.copy(alpha = 0.65f)
-                        )
-                    ),
-                    shape = CircleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            // Reuses the app's signature cyan/blue ParticleAvatar3D shimmer sphere (IDLE = pure cyan/blue)
-            ParticleAvatar3D(
-                status = AssistantStatus.IDLE,
-                modifier = Modifier.size(orbSize)
             )
-        }
+            .border(
+                width = 1.25.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        ElectricCyan.copy(alpha = 0.72f),
+                        HologramBlue.copy(alpha = 0.25f),
+                        ElectricCyan.copy(alpha = 0.62f)
+                    )
+                ),
+                shape = cardShape
+            )
+            .testTag("onboarding_arc_logo"),
+        contentAlignment = Alignment.Center
+    ) {
+        ArcBrandLogo(
+            size = logoSize,
+            animatePulse = true,
+            showAmbientGlow = true
+        )
     }
 }
 

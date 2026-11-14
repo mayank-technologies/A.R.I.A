@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,6 +50,7 @@ import com.example.assistant.security.AntiTheftSirenManager
 import com.example.assistant.security.SirenGuardState
 import com.example.ui.AriaViewModel
 import com.example.ui.components.AntiTheftAlertDialog
+import com.example.ui.components.ArcBrandLogo
 import com.example.ui.components.AriaWebViewDialog
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.QuickToolsScreen
@@ -57,6 +59,7 @@ import com.example.ui.screens.VoiceHudScreen
 import com.example.ui.theme.AriaTheme
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.DeepSpace
+import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.SurfaceDark
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -210,18 +213,37 @@ fun AriaSplashScreen() {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(24.dp)
         ) {
+            ArcBrandLogo(
+                size = 132.dp,
+                animatePulse = true,
+                showAmbientGlow = true,
+                modifier = Modifier.testTag("splash_arc_logo")
+            )
+            Spacer(modifier = Modifier.height(18.dp))
+            Text(
+                text = "ARC",
+                color = ElectricCyan,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.ExtraBold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 7.sp
+            )
+            Spacer(modifier = Modifier.height(14.dp))
             CircularProgressIndicator(
                 color = CyberCyan,
-                strokeWidth = 3.dp
+                strokeWidth = 2.5.dp
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             Text(
-                text = "ARC Initializing...",
+                text = "SYSTEM INITIALIZING...",
                 color = TextSecondary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 2.sp
             )
         }
     }

@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Safe-zone framed (66dp inside 108dp canvas) geometric circuit-A foreground -->
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/aria_icon_1786017123080"
+        android:drawable="@drawable/arc_circuit_a_icon_1794652165691"
         android:gravity="center" />
 </layer-list>

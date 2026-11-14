@@ -116,6 +116,7 @@ import com.example.geminilive.GeminiLiveSessionState
 import com.example.ui.AriaViewModel
 import com.example.ui.AssistantStatus
 import com.example.ui.components.ListeningPulseIndicator
+import com.example.ui.components.ArcBrandLogo
 import com.example.ui.components.ParticleAvatar3D
 import com.example.ui.theme.CarbonBlack
 import com.example.ui.theme.CyberCyan
@@ -1381,22 +1382,32 @@ private fun ArcDrawerContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = "ARC CONTROL",
-                        color = ElectricCyan,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 2.5.sp
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ArcBrandLogo(
+                        size = 38.dp,
+                        animatePulse = false,
+                        showAmbientGlow = false
                     )
-                    Text(
-                        text = "SYSTEMS & TRANSCRIPT",
-                        color = TextSecondary,
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 1.sp
-                    )
+                    Column {
+                        Text(
+                            text = "ARC CONTROL",
+                            color = ElectricCyan,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 2.5.sp
+                        )
+                        Text(
+                            text = "SYSTEMS & TRANSCRIPT",
+                            color = TextSecondary,
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 1.sp
+                        )
+                    }
                 }
                 IconButton(
                     onClick = onCloseDrawer,

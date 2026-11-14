@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Deep obsidian dark splash backdrop consistent with DeepSpace (#040711) / #010717 -->
+    <item android:drawable="@color/arc_splash_background" />
+
+    <!-- Centered crisp geometric circuit-A ARC logo -->
+    <item
+        android:width="116dp"
+        android:height="116dp"
+        android:drawable="@drawable/ic_arc_logo"
+        android:gravity="center" />
+</layer-list>

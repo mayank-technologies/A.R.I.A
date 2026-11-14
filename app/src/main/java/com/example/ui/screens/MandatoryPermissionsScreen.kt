@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryAlert
@@ -43,7 +42,6 @@ import androidx.compose.material.icons.filled.MarkChatUnread
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -76,6 +74,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.assistant.whatsapp.WhatsAppAutomationManager
+import com.example.ui.components.ArcBrandLogo
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.DeepSpace
 import com.example.ui.theme.ElectricEmerald
@@ -326,21 +325,11 @@ fun MandatoryPermissionsScreen(
                     .fillMaxWidth()
                     .padding(vertical = 12.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(CircleShape)
-                        .background(CyberCyan.copy(alpha = 0.12f))
-                        .border(1.5.dp, CyberCyan, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Security,
-                        contentDescription = "Security Permissions",
-                        tint = CyberCyan,
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
+                ArcBrandLogo(
+                    size = 76.dp,
+                    animatePulse = true,
+                    showAmbientGlow = true
+                )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
