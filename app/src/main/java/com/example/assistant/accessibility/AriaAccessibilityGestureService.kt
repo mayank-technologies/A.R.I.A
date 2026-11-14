@@ -4,16 +4,29 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Path
+import android.graphics.Rect
 import android.os.Build
 import android.provider.Settings
-import android.util.DisplayMetrics
 import android.util.Log
-import android.view.WindowManager
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.languageid.LanguageIdentification
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 
 sealed class GestureResult {
     data class Success(val message: String) : GestureResult()
@@ -21,17 +34,16 @@ sealed class GestureResult {
 }
 
 /**
- * Android Native AccessibilityService for ARIA Voice Gesture Automation.
+ * Android Native AccessibilityService for ARC Voice Gestures + Screen Vision & ML Kit OCR/Translation.
  *
- * Capabilities:
- * 1. "scroll this video/reel/shorts", "next reel", "scroll down" -> Simulates upward swipe gesture
- * 2. "pause this video/reel/shorts", "play video", "pause this" -> Simulates center-screen tap gesture
- * 3. "previous reel", "scroll up" -> Simulates downward swipe gesture
- * 4. "double tap", "like this video" -> Simulates center-screen double tap
- *
- * NOTE FOR FLUTTER & MULTI-PLATFORM DEVELOPERS:
- * - This feature is EXCLUSIVE TO ANDROID via Android Accessibility APIs (dispatchGesture).
- * - iOS does NOT allow third-party apps to simulate system-wide touch/swipe gestures on external apps (Apple sandbox security policy).
+ * Integrated Capabilities:
+ * 1. Reels/Shorts Gestures: scroll next, scroll previous, play/pause center tap, double-tap like.
+ * 2. Screen Text Reading: AccessibilityNodeInfo tree extraction + Android 11+ takeScreenshot() with
+ *    ML Kit On-Device OCR fallback for images/posters/video frames.
+ * 3. Named Button Auto-Tap: Tries Accessibility ACTION_CLICK first and falls back to exact
+ *    coordinate tap via dispatchGesture(bounds.centerX(), bounds.centerY()).
+ * 4. On-Device Screen Translation: Extracts visible screen text -> identifies language -> translates
+ *    on-device using ML Kit Translation.
  */
 class AriaAccessibilityGestureService : AccessibilityService() {
 
@@ -43,14 +55,8 @@ class AriaAccessibilityGestureService : AccessibilityService() {
         private val _isServiceEnabled = MutableStateFlow(false)
         val isServiceEnabled: StateFlow<Boolean> = _isServiceEnabled.asStateFlow()
 
-        /**
-         * Check if ARIA's accessibility service is currently enabled by the user in Android Settings
-         */
         fun isServiceRunning(): Boolean = instance != null
 
-        /**
-         * System setting check to see if accessibility is enabled for ARIA package
-         */
         fun checkAccessibilityEnabled(context: Context): Boolean {
             val expectedServiceName = "${context.packageName}/${AriaAccessibilityGestureService::class.java.canonicalName}"
             val enabledServices = Settings.Secure.getString(
@@ -67,9 +73,6 @@ class AriaAccessibilityGestureService : AccessibilityService() {
             return accessibilityEnabled && enabledServices.contains(expectedServiceName)
         }
 
-        /**
-         * Open Android System Settings to Accessibility page so user can toggle ARIA ON
-         */
         fun openAccessibilitySettings(context: Context) {
             try {
                 val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
@@ -81,69 +84,80 @@ class AriaAccessibilityGestureService : AccessibilityService() {
             }
         }
 
-        /**
-         * Voice Action: Scroll to Next Video / Reel / Short (Swipe Up)
-         */
         fun scrollNextVideo(callback: ((GestureResult) -> Unit)? = null) {
             val service = instance
             if (service == null) {
-                callback?.invoke(GestureResult.Failure("Accessibility Service off hai. Pehle Settings me ARIA ko enable kijiye."))
+                callback?.invoke(GestureResult.Failure("Accessibility Service off hai. Pehle Settings me ARC ko enable kijiye."))
                 return
             }
             service.performSwipeUp(callback)
         }
 
-        /**
-         * Voice Action: Scroll to Previous Video / Reel (Swipe Down)
-         */
         fun scrollPreviousVideo(callback: ((GestureResult) -> Unit)? = null) {
             val service = instance
             if (service == null) {
-                callback?.invoke(GestureResult.Failure("Accessibility Service off hai. Pehle Settings me ARIA ko enable kijiye."))
+                callback?.invoke(GestureResult.Failure("Accessibility Service off hai. Pehle Settings me ARC ko enable kijiye."))
                 return
             }
             service.performSwipeDown(callback)
         }
 
-        /**
-         * Voice Action: Pause / Play Video (Single Center Tap)
-         */
         fun togglePlayPauseVideo(callback: ((GestureResult) -> Unit)? = null) {
             val service = instance
             if (service == null) {
-                callback?.invoke(GestureResult.Failure("Accessibility Service off hai. Pehle Settings me ARIA ko enable kijiye."))
+                callback?.invoke(GestureResult.Failure("Accessibility Service off hai. Pehle Settings me ARC ko enable kijiye."))
                 return
             }
             service.performCenterTap(callback)
         }
 
-        /**
-         * Voice Action: Like Video / Reel (Double Tap at Center)
-         */
         fun doubleTapLikeVideo(callback: ((GestureResult) -> Unit)? = null) {
             val service = instance
             if (service == null) {
-                callback?.invoke(GestureResult.Failure("Accessibility Service off hai. Pehle Settings me ARIA ko enable kijiye."))
+                callback?.invoke(GestureResult.Failure("Accessibility Service off hai. Pehle Settings me ARC ko enable kijiye."))
                 return
             }
             service.performDoubleTap(callback)
         }
 
-        /**
-         * Voice Action: Read Screen Content Aloud (Extract text from Accessibility Node Tree)
-         */
-        fun readScreenContent(callback: (String) -> Unit) {
+        fun readScreenContent(forceOcr: Boolean = false, callback: (String) -> Unit) {
             val service = instance
             if (service == null) {
                 callback("Accessibility Service off hai. Pehle Settings me ARC ko permission dijiye.")
                 return
             }
-            service.extractActiveScreenText(callback)
+            service.extractActiveScreenTextWithOcrFallback(forceOcr, callback)
         }
 
-        /**
-         * Voice Action: Auto-tap button by label/name
-         */
+        suspend fun readScreenContentSuspend(forceOcr: Boolean = false): String {
+            return withTimeoutOrNull(8000L) {
+                suspendCancellableCoroutine { cont ->
+                    readScreenContent(forceOcr) { result ->
+                        if (cont.isActive) cont.resume(result)
+                    }
+                }
+            } ?: "Screen read timeout ho gaya, Boss."
+        }
+
+        fun translateScreenContent(targetLanguageCode: String = TranslateLanguage.HINDI, callback: (String) -> Unit) {
+            val service = instance
+            if (service == null) {
+                callback("Accessibility Service off hai. Pehle Settings me ARC ko permission dijiye.")
+                return
+            }
+            service.extractAndTranslateScreen(targetLanguageCode, callback)
+        }
+
+        suspend fun translateScreenContentSuspend(targetLanguageCode: String = TranslateLanguage.HINDI): String {
+            return withTimeoutOrNull(18000L) {
+                suspendCancellableCoroutine { cont ->
+                    translateScreenContent(targetLanguageCode) { result ->
+                        if (cont.isActive) cont.resume(result)
+                    }
+                }
+            } ?: "Screen translation timeout ho gaya. Offline language model download check karein."
+        }
+
         fun autoTapButtonByName(buttonLabel: String, callback: ((GestureResult) -> Unit)? = null) {
             val service = instance
             if (service == null) {
@@ -152,33 +166,40 @@ class AriaAccessibilityGestureService : AccessibilityService() {
             }
             service.findAndClickNodeByText(buttonLabel, callback)
         }
+
+        suspend fun autoTapButtonByNameSuspend(buttonLabel: String): GestureResult {
+            return withTimeoutOrNull(4000L) {
+                suspendCancellableCoroutine { cont ->
+                    autoTapButtonByName(buttonLabel) { result ->
+                        if (cont.isActive) cont.resume(result)
+                    }
+                }
+            } ?: GestureResult.Failure("'$buttonLabel' button tap timeout ho gaya.")
+        }
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         _isServiceEnabled.value = true
-        Log.d(TAG, "🚀 ARIA Accessibility Gesture Service Connected & Ready!")
+        Log.d(TAG, "ARC Accessibility Gesture & Screen Vision Service Connected!")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Window/Content event monitoring if needed
+        // Real-time window changes available on demand
     }
 
     override fun onInterrupt() {
-        Log.w(TAG, "ARIA Accessibility Service Interrupted")
+        Log.w(TAG, "ARC Accessibility Service Interrupted")
     }
 
     override fun onDestroy() {
         super.onDestroy()
         instance = null
         _isServiceEnabled.value = false
-        Log.d(TAG, "ARIA Accessibility Service Destroyed")
+        Log.d(TAG, "ARC Accessibility Service Destroyed")
     }
 
-    /**
-     * Dispatch swipe gesture from bottom to top (Shorts/Reels swipe next)
-     */
     private fun performSwipeUp(callback: ((GestureResult) -> Unit)?) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             callback?.invoke(GestureResult.Failure("Gesture dispatch requires Android 7.0 (Nougat) or higher."))
@@ -189,38 +210,28 @@ class AriaAccessibilityGestureService : AccessibilityService() {
         val width = metrics.widthPixels.toFloat()
         val height = metrics.heightPixels.toFloat()
 
-        val startX = width * 0.5f
-        val startY = height * 0.78f // Start near bottom
-        val endX = width * 0.5f
-        val endY = height * 0.22f   // End near top
-
         val swipePath = Path().apply {
-            moveTo(startX, startY)
-            lineTo(endX, endY)
+            moveTo(width * 0.5f, height * 0.78f)
+            lineTo(width * 0.5f, height * 0.22f)
         }
 
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(swipePath, 0, 260)) // 260ms smooth fast swipe
+            .addStroke(GestureDescription.StrokeDescription(swipePath, 0, 260))
             .build()
 
         dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 super.onCompleted(gestureDescription)
-                Log.d(TAG, "✅ Swipe Up (Next Video) Gesture Completed!")
                 callback?.invoke(GestureResult.Success("Video scroll ho gaya hai! 📱✨"))
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
                 super.onCancelled(gestureDescription)
-                Log.w(TAG, "❌ Swipe Up Gesture Cancelled")
                 callback?.invoke(GestureResult.Failure("Swipe gesture cancel ho gaya."))
             }
         }, null)
     }
 
-    /**
-     * Dispatch swipe gesture from top to bottom (Previous Reel/Short)
-     */
     private fun performSwipeDown(callback: ((GestureResult) -> Unit)?) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             callback?.invoke(GestureResult.Failure("Gesture dispatch requires Android 7.0+"))
@@ -231,14 +242,9 @@ class AriaAccessibilityGestureService : AccessibilityService() {
         val width = metrics.widthPixels.toFloat()
         val height = metrics.heightPixels.toFloat()
 
-        val startX = width * 0.5f
-        val startY = height * 0.25f
-        val endX = width * 0.5f
-        val endY = height * 0.75f
-
         val swipePath = Path().apply {
-            moveTo(startX, startY)
-            lineTo(endX, endY)
+            moveTo(width * 0.5f, height * 0.25f)
+            lineTo(width * 0.5f, height * 0.75f)
         }
 
         val gesture = GestureDescription.Builder()
@@ -258,45 +264,17 @@ class AriaAccessibilityGestureService : AccessibilityService() {
         }, null)
     }
 
-    /**
-     * Dispatch single tap at screen center (Toggle Pause / Play)
-     */
     private fun performCenterTap(callback: ((GestureResult) -> Unit)?) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            callback?.invoke(GestureResult.Failure("Gesture dispatch requires Android 7.0+"))
-            return
-        }
-
         val metrics = resources.displayMetrics
-        val centerX = metrics.widthPixels * 0.5f
-        val centerY = metrics.heightPixels * 0.5f
-
-        val tapPath = Path().apply {
-            moveTo(centerX, centerY)
-        }
-
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(tapPath, 0, 50)) // 50ms tap duration
-            .build()
-
-        dispatchGesture(gesture, object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                super.onCompleted(gestureDescription)
-                Log.d(TAG, "✅ Center Tap (Play/Pause) Gesture Completed!")
-                callback?.invoke(GestureResult.Success("Video play/pause toggle kar diya hai! ⏯️"))
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                super.onCancelled(gestureDescription)
-                Log.w(TAG, "❌ Center Tap Cancelled")
-                callback?.invoke(GestureResult.Failure("Tap gesture cancel ho gaya."))
-            }
-        }, null)
+        dispatchTapAt(
+            x = metrics.widthPixels * 0.5f,
+            y = metrics.heightPixels * 0.5f,
+            successMessage = "Video play/pause toggle kar diya hai! ⏯️",
+            failureMessage = "Tap gesture cancel ho gaya.",
+            callback = callback
+        )
     }
 
-    /**
-     * Dispatch double tap at screen center (Like Reel / Video)
-     */
     private fun performDoubleTap(callback: ((GestureResult) -> Unit)?) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
             callback?.invoke(GestureResult.Failure("Gesture dispatch requires Android 7.0+"))
@@ -304,19 +282,13 @@ class AriaAccessibilityGestureService : AccessibilityService() {
         }
 
         val metrics = resources.displayMetrics
-        val centerX = metrics.widthPixels * 0.5f
-        val centerY = metrics.heightPixels * 0.5f
-
         val tapPath = Path().apply {
-            moveTo(centerX, centerY)
+            moveTo(metrics.widthPixels * 0.5f, metrics.heightPixels * 0.5f)
         }
 
-        val stroke1 = GestureDescription.StrokeDescription(tapPath, 0, 40)
-        val stroke2 = GestureDescription.StrokeDescription(tapPath, 110, 40)
-
         val gesture = GestureDescription.Builder()
-            .addStroke(stroke1)
-            .addStroke(stroke2)
+            .addStroke(GestureDescription.StrokeDescription(tapPath, 0, 40))
+            .addStroke(GestureDescription.StrokeDescription(tapPath, 110, 40))
             .build()
 
         dispatchGesture(gesture, object : GestureResultCallback() {
@@ -332,29 +304,49 @@ class AriaAccessibilityGestureService : AccessibilityService() {
         }, null)
     }
 
-    /**
-     * Traverses the AccessibilityNodeInfo tree and extracts all visible text content on screen.
-     */
-    private fun extractActiveScreenText(callback: (String) -> Unit) {
-        val rootNode = rootInActiveWindow
-        if (rootNode == null) {
-            callback("Screen content read nahi ho saka (empty window).")
+    private fun dispatchTapAt(
+        x: Float,
+        y: Float,
+        successMessage: String,
+        failureMessage: String,
+        callback: ((GestureResult) -> Unit)?
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            callback?.invoke(GestureResult.Failure("Gesture dispatch requires Android 7.0+"))
             return
         }
 
-        val collectedText = mutableListOf<String>()
-        traverseNodeForText(rootNode, collectedText)
-        rootNode.recycle()
+        val tapPath = Path().apply { moveTo(x, y) }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(tapPath, 0, 50))
+            .build()
 
-        if (collectedText.isEmpty()) {
-            callback("Screen par koi readable text nahi mila.")
-        } else {
-            val fullText = collectedText.distinct().take(12).joinToString(". ")
-            callback("Screen par ye likha hai: $fullText")
-        }
+        dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                super.onCompleted(gestureDescription)
+                callback?.invoke(GestureResult.Success(successMessage))
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                super.onCancelled(gestureDescription)
+                callback?.invoke(GestureResult.Failure(failureMessage))
+            }
+        }, null)
     }
 
-    private fun traverseNodeForText(node: android.view.accessibility.AccessibilityNodeInfo?, list: MutableList<String>) {
+    /**
+     * Collects raw text lines from AccessibilityNodeInfo tree without user-facing prefix.
+     */
+    private fun collectRawAccessibilityText(): List<String> {
+        val rootNode = rootInActiveWindow ?: return emptyList()
+        val collectedText = mutableListOf<String>()
+        traverseNodeForText(rootNode, collectedText)
+        @Suppress("DEPRECATION")
+        rootNode.recycle()
+        return collectedText.distinct()
+    }
+
+    private fun traverseNodeForText(node: AccessibilityNodeInfo?, list: MutableList<String>) {
         if (node == null) return
         val text = node.text?.toString()?.trim()
         val desc = node.contentDescription?.toString()?.trim()
@@ -365,51 +357,257 @@ class AriaAccessibilityGestureService : AccessibilityService() {
         for (i in 0 until node.childCount) {
             val child = node.getChild(i)
             traverseNodeForText(child, list)
+            @Suppress("DEPRECATION")
             child?.recycle()
         }
     }
 
     /**
-     * Finds an interactive node containing the target button text and executes ACTION_CLICK.
+     * Extracts screen text from Accessibility tree, and falls back to Android 11+ takeScreenshot +
+     * ML Kit On-Device OCR when tree text is empty/minimal or forceOcr is requested.
+     */
+    private fun extractActiveScreenTextWithOcrFallback(
+        forceOcr: Boolean,
+        callback: (String) -> Unit
+    ) {
+        val treeItems = collectRawAccessibilityText()
+        if (!forceOcr && treeItems.size >= 2) {
+            val fullText = treeItems.take(15).joinToString(". ")
+            callback("Screen par ye likha hai: $fullText")
+            return
+        }
+
+        // ML Kit OCR fallback on Android 11+ (API 30+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runMlKitOcrOnCurrentScreen { ocrText ->
+                val merged = when {
+                    ocrText.isNotBlank() && treeItems.isNotEmpty() ->
+                        "${treeItems.take(6).joinToString(". ")}. $ocrText"
+                    ocrText.isNotBlank() -> ocrText
+                    treeItems.isNotEmpty() -> treeItems.take(10).joinToString(". ")
+                    else -> ""
+                }
+                if (merged.isNotBlank()) {
+                    callback("Screen Vision (OCR) result: ${merged.take(600)}")
+                } else {
+                    callback("Screen par koi readable text ya image text nahi mila.")
+                }
+            }
+        } else {
+            if (treeItems.isNotEmpty()) {
+                callback("Screen par ye likha hai: ${treeItems.take(12).joinToString(". ")}")
+            } else {
+                callback("Screen par koi readable text nahi mila (Image OCR fallback Android 11+ par available hai).")
+            }
+        }
+    }
+
+    /**
+     * Takes an Accessibility screenshot (API 30+) and extracts text with ML Kit TextRecognition.
+     */
+    private fun runMlKitOcrOnCurrentScreen(callback: (String) -> Unit) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            callback("")
+            return
+        }
+        try {
+            takeScreenshot(
+                Display.DEFAULT_DISPLAY,
+                mainExecutor,
+                object : TakeScreenshotCallback {
+                    override fun onSuccess(screenshot: ScreenshotResult) {
+                        val hardwareBuffer = screenshot.hardwareBuffer
+                        val colorSpace = screenshot.colorSpace
+                        val hwBitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, colorSpace)
+                        if (hwBitmap == null) {
+                            hardwareBuffer.close()
+                            callback("")
+                            return
+                        }
+                        val softwareBitmap = hwBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                        hwBitmap.recycle()
+                        hardwareBuffer.close()
+
+                        if (softwareBitmap == null) {
+                            callback("")
+                            return
+                        }
+
+                        val image = InputImage.fromBitmap(softwareBitmap, 0)
+                        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                        recognizer.process(image)
+                            .addOnSuccessListener { visionText ->
+                                softwareBitmap.recycle()
+                                val cleaned = visionText.text.trim().replace("\n", ". ")
+                                callback(cleaned)
+                            }
+                            .addOnFailureListener { e ->
+                                softwareBitmap.recycle()
+                                Log.e(TAG, "ML Kit OCR error: ${e.message}")
+                                callback("")
+                            }
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        Log.w(TAG, "Accessibility takeScreenshot failed with error code: $errorCode")
+                        callback("")
+                    }
+                }
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "takeScreenshot exception: ${e.message}")
+            callback("")
+        }
+    }
+
+    /**
+     * Extracts on-screen text (Accessibility + OCR fallback) and translates it on-device using ML Kit.
+     */
+    private fun extractAndTranslateScreen(
+        targetLangCode: String,
+        callback: (String) -> Unit
+    ) {
+        extractActiveScreenTextWithOcrFallback(forceOcr = false) { rawScreenSummary ->
+            val rawText = rawScreenSummary
+                .removePrefix("Screen par ye likha hai: ")
+                .removePrefix("Screen Vision (OCR) result: ")
+                .trim()
+
+            if (rawText.isBlank() || rawText.startsWith("Screen par koi readable")) {
+                callback("Screen par translate karne ke liye koi text nahi mila.")
+                return@extractActiveScreenTextWithOcrFallback
+            }
+
+            val sampleForLangId = rawText.take(400)
+            val languageIdentifier = LanguageIdentification.getClient()
+            languageIdentifier.identifyLanguage(sampleForLangId)
+                .addOnSuccessListener { detectedCode ->
+                    val sourceCode = if (detectedCode == "und") {
+                        TranslateLanguage.ENGLISH
+                    } else {
+                        TranslateLanguage.fromLanguageTag(detectedCode) ?: TranslateLanguage.ENGLISH
+                    }
+
+                    if (sourceCode == targetLangCode) {
+                        callback("Screen text pehle se target language me hai: ${rawText.take(350)}")
+                        return@addOnSuccessListener
+                    }
+
+                    val options = TranslatorOptions.Builder()
+                        .setSourceLanguage(sourceCode)
+                        .setTargetLanguage(targetLangCode)
+                        .build()
+                    val translator = Translation.getClient(options)
+                    val conditions = DownloadConditions.Builder().build()
+
+                    translator.downloadModelIfNeeded(conditions)
+                        .addOnSuccessListener {
+                            translator.translate(rawText.take(600))
+                                .addOnSuccessListener { translated ->
+                                    translator.close()
+                                    callback("Screen translation ($sourceCode -> $targetLangCode): $translated")
+                                }
+                                .addOnFailureListener { e ->
+                                    translator.close()
+                                    callback("On-device translation failed: ${e.localizedMessage}")
+                                }
+                        }
+                        .addOnFailureListener { e ->
+                            translator.close()
+                            callback("Offline translation model download nahi ho saka (internet check karein): ${e.localizedMessage}")
+                        }
+                }
+                .addOnFailureListener {
+                    callback("Screen language detect nahi ho saki.")
+                }
+        }
+    }
+
+    /**
+     * Finds interactive node matching targetLabel and executes ACTION_CLICK,
+     * falling back to coordinate-based dispatchGesture() tap at node bounds center.
      */
     private fun findAndClickNodeByText(targetLabel: String, callback: ((GestureResult) -> Unit)?) {
+        val cleanTarget = targetLabel.trim()
+        if (cleanTarget.isBlank()) {
+            callback?.invoke(GestureResult.Failure("Button ka naam batayein, Boss."))
+            return
+        }
+
         val rootNode = rootInActiveWindow
         if (rootNode == null) {
             callback?.invoke(GestureResult.Failure("Screen read nahi ho pa raha hai."))
             return
         }
 
-        val matchedNodes = rootNode.findAccessibilityNodeInfosByText(targetLabel)
-        if (matchedNodes.isNullOrEmpty()) {
+        val matchedNodes = mutableListOf<AccessibilityNodeInfo>()
+        rootNode.findAccessibilityNodeInfosByText(cleanTarget)?.let { matchedNodes.addAll(it) }
+
+        if (matchedNodes.isEmpty()) {
+            findMatchingNodesRecursive(rootNode, cleanTarget.lowercase(), matchedNodes)
+        }
+
+        if (matchedNodes.isEmpty()) {
+            @Suppress("DEPRECATION")
             rootNode.recycle()
-            callback?.invoke(GestureResult.Failure("'$targetLabel' button screen par nahi mila."))
+            callback?.invoke(GestureResult.Failure("'$cleanTarget' button screen par nahi mila."))
             return
         }
 
+        // 1. Try native Accessibility ACTION_CLICK on node or clickable parent
         for (node in matchedNodes) {
-            if (node.isClickable) {
-                val clicked = node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-                if (clicked) {
-                    rootNode.recycle()
-                    callback?.invoke(GestureResult.Success("'$targetLabel' button par click kar diya hai! 👆"))
-                    return
-                }
+            if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                @Suppress("DEPRECATION")
+                rootNode.recycle()
+                callback?.invoke(GestureResult.Success("'$cleanTarget' button par click kar diya hai! 👆"))
+                return
             }
-            // Check parent if child is text view inside button
             val parent = node.parent
             if (parent != null && parent.isClickable) {
-                val clicked = parent.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                val clicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                @Suppress("DEPRECATION")
+                parent.recycle()
                 if (clicked) {
-                    parent.recycle()
+                    @Suppress("DEPRECATION")
                     rootNode.recycle()
-                    callback?.invoke(GestureResult.Success("'$targetLabel' button par click kar diya hai! 👆"))
+                    callback?.invoke(GestureResult.Success("'$cleanTarget' button par click kar diya hai! 👆"))
                     return
                 }
-                parent.recycle()
             }
         }
 
+        // 2. Fallback: Exact coordinate tap via dispatchGesture() on matched node bounds
+        val firstBounds = Rect()
+        matchedNodes.first().getBoundsInScreen(firstBounds)
+        @Suppress("DEPRECATION")
         rootNode.recycle()
-        callback?.invoke(GestureResult.Failure("'$targetLabel' mila lekin click action perform nahi ho saka."))
+
+        if (!firstBounds.isEmpty) {
+            dispatchTapAt(
+                x = firstBounds.centerX().toFloat(),
+                y = firstBounds.centerY().toFloat(),
+                successMessage = "'$cleanTarget' button par gesture tap kar diya hai! 👆",
+                failureMessage = "'$cleanTarget' mila lekin gesture tap cancel ho gaya.",
+                callback = callback
+            )
+        } else {
+            callback?.invoke(GestureResult.Failure("'$cleanTarget' mila lekin tap coordinates available nahi the."))
+        }
+    }
+
+    private fun findMatchingNodesRecursive(
+        node: AccessibilityNodeInfo?,
+        queryLower: String,
+        results: MutableList<AccessibilityNodeInfo>
+    ) {
+        if (node == null) return
+        val text = node.text?.toString()?.lowercase()?.trim().orEmpty()
+        val desc = node.contentDescription?.toString()?.lowercase()?.trim().orEmpty()
+        if (text.contains(queryLower) || desc.contains(queryLower)) {
+            results.add(node)
+        }
+        for (i in 0 until node.childCount) {
+            findMatchingNodesRecursive(node.getChild(i), queryLower, results)
+        }
     }
 }

@@ -33,10 +33,10 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Advanced ARIA Speech Engine featuring:
- * 1. ElevenLabs Neural Human Voice Synthesis (Rachel / Warm Female Voice)
- * 2. MD5 Disk Audio Caching for fast, zero-quota playback on repeated sentences
+ * 1. ElevenLabs Neural Human Voice Synthesis (Adam / Warm Deep Male Voice)
+ * 2. Voice-scoped MD5 Disk Audio Caching for fast playback on repeated sentences
  * 3. Android MediaPlayer for smooth high-fidelity audio output
- * 4. Automatic Seamless Fallback to Native Android TextToSpeech when offline or on API failure
+ * 4. Automatic Seamless Fallback to Native Android TextToSpeech (Male) when offline or on API failure
  * 5. Latency/Synthesizing state indication for UI
  */
 class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListener {
@@ -50,15 +50,22 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     private var isNativeTtsInitialized = false
     private var pendingTextToSpeak: String? = null
 
-    // ElevenLabs Configuration
-    // Rachel: "21m00Tcm4TlvDq8ikWAM" (Natural, Warm, Clear Female Voice)
-    // Sarah:  "EXAVITQu4vr4xnSDxMaL"
+    // ElevenLabs Configuration (Male Voices)
+    // Adam:   "pNInz6obpgDQGcFmaJgB" (Deep, Natural, Warm Male Voice)
+    // Antoni: "ErXwobaYiN019PkySvjV" (Warm Well-Rounded Male Voice)
+    // Josh:   "TxGEqnHWrfWFTfGW9XjX" (Deep Narrative Male Voice)
     private var voiceId = try {
         val prefs = context.getSharedPreferences("aria_prefs", Context.MODE_PRIVATE)
-        val savedVoiceId = prefs.getString("elevenlabs_voice_id", "")
-        if (!savedVoiceId.isNullOrBlank()) savedVoiceId else "21m00Tcm4TlvDq8ikWAM"
+        val savedVoiceId = prefs.getString("elevenlabs_voice_id", "") ?: ""
+        val legacyFemaleIds = setOf("21m00Tcm4TlvDq8ikWAM", "EXAVITQu4vr4xnSDxMaL")
+        if (savedVoiceId.isBlank() || savedVoiceId in legacyFemaleIds) {
+            prefs.edit().putString("elevenlabs_voice_id", "pNInz6obpgDQGcFmaJgB").apply()
+            "pNInz6obpgDQGcFmaJgB"
+        } else {
+            savedVoiceId
+        }
     } catch (e: Exception) {
-        "21m00Tcm4TlvDq8ikWAM"
+        "pNInz6obpgDQGcFmaJgB"
     }
     private var apiKey = try { BuildConfig::class.java.getField("ELEVENLABS_API_KEY").get(null) as? String ?: "" } catch (e: Exception) { "" }
 
@@ -110,26 +117,35 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                 nativeTts?.setLanguage(Locale.US)
             }
             nativeTts?.setSpeechRate(_speechRate.value)
-            nativeTts?.setPitch(1.10f)
+            nativeTts?.setPitch(0.90f)
 
-            // Select Permanent Female Voice if available on device
+            // Select Permanent Male Voice if available on device
             try {
                 val availableVoices = nativeTts?.voices
                 if (availableVoices != null) {
-                    val femaleVoice = availableVoices.find { voice ->
-                        voice.name.contains("female", ignoreCase = true) ||
-                        voice.name.contains("hi-in-x-fie", ignoreCase = true) ||
-                        voice.name.contains("hi-in-x-hic", ignoreCase = true) ||
-                        voice.name.contains("en-us-x-sfg", ignoreCase = true) ||
-                        voice.name.contains("en-in-x-eef", ignoreCase = true)
+                    val maleVoice = availableVoices.firstOrNull { voice ->
+                        val name = voice.name.lowercase(Locale.ROOT)
+                        !name.contains("female") && (
+                            name.contains("-male") ||
+                                name.contains("_male") ||
+                                name.contains("male") ||
+                                name.contains("hi-in-x-hid") ||
+                                name.contains("hi-in-x-hia") ||
+                                name.contains("en-us-x-iom") ||
+                                name.contains("en-us-x-tpd") ||
+                                name.contains("en-in-x-end") ||
+                                name.contains("en-in-x-enc")
+                            )
                     }
-                    if (femaleVoice != null) {
-                        nativeTts?.voice = femaleVoice
-                        Log.d("AriaSpeechEngine", "Selected permanent female voice: ${femaleVoice.name}")
+                    if (maleVoice != null) {
+                        nativeTts?.voice = maleVoice
+                        Log.d("AriaSpeechEngine", "Selected permanent male voice: ${maleVoice.name}")
+                    } else {
+                        Log.d("AriaSpeechEngine", "No explicit male TTS voice tag found; using deeper pitch (0.90f)")
                     }
                 }
             } catch (e: Exception) {
-                Log.e("AriaSpeechEngine", "Could not set custom female voice: ${e.message}")
+                Log.e("AriaSpeechEngine", "Could not set custom male voice: ${e.message}")
             }
 
             nativeTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -402,7 +418,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     }
 
     private fun getCachedAudioFile(text: String): File {
-        val hash = md5(text.trim().lowercase(Locale.ROOT))
+        val hash = md5("${voiceId}_${text.trim().lowercase(Locale.ROOT)}")
         return File(audioCacheDir, "$hash.mp3")
     }
 

@@ -71,7 +71,7 @@ object GeminiClient {
         val request = GeminiRequest(
             contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = prompt)))),
             systemInstruction = GeminiContent(
-                parts = listOf(GeminiPart(text = "You are ARC (Autonomous Reactive Core), a JARVIS-inspired voice assistant. Your name is ARC. Current device local time: ${clockInfo.formattedTime}, ${clockInfo.formattedDate} (${clockInfo.timeZoneId}). Keep answers concise, helpful, and friendly (2-3 sentences max unless explaining code).")))
+                parts = listOf(GeminiPart(text = "You are ARC (Autonomous Reactive Core), a warm, JARVIS-inspired male voice assistant. Your name is ARC. Current device local time: ${clockInfo.formattedTime}, ${clockInfo.formattedDate} (${clockInfo.timeZoneId}). Speak naturally with subtle warmth and use masculine Hindi/Hinglish grammar when replying in Hindi/Hinglish (e.g., kar raha hu, bata raha hu). Keep answers concise, helpful, and friendly (2-3 sentences max unless explaining code).")))
         )
         return try {
             val res = service.generateContent(apiKey, request)

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- WhatsApp voice-note recordings and Anti-Theft visible alert snapshots -->
+    <cache-path
+        name="arc_voice_notes"
+        path="arc_voice_notes/" />
+    <cache-path
+        name="arc_security_photos"
+        path="arc_security_photos/" />
+    <cache-path
+        name="all_cache"
+        path="." />
+</paths>

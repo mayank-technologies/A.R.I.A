@@ -50,7 +50,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     val geminiLiveManager = com.example.geminilive.GeminiLiveVoiceManager(application)
 
     private val _isGeminiLiveMode = MutableStateFlow(
-        prefs.getBoolean("arc_gemini_live_mode", false)
+        prefs.getBoolean("arc_gemini_live_mode", true)
     )
     val isGeminiLiveMode: StateFlow<Boolean> = _isGeminiLiveMode.asStateFlow()
 
@@ -163,7 +163,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         listOf(
             MemoryFactItem(key = "Operator Name", value = prefs.getString("user_name", "Boss") ?: "Boss", category = "Identity"),
             MemoryFactItem(key = "Wake-Word State", value = "Hey ARC (Hands-free active)", category = "Settings"),
-            MemoryFactItem(key = "Primary Voice", value = "ElevenLabs Neural Engine", category = "Speech"),
+            MemoryFactItem(key = "Primary Voice", value = "Gemini Live Male (Charon) + Male TTS", category = "Speech"),
             MemoryFactItem(key = "Default Navigation", value = "Google Maps", category = "Apps"),
             MemoryFactItem(key = "System Preference", value = "Hinglish + English Bilingual", category = "Language")
         )
@@ -171,12 +171,39 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     val memoryFacts: StateFlow<List<MemoryFactItem>> = _memoryFacts.asStateFlow()
 
     init {
+        geminiLiveManager.setOnFallbackSpeechListener { pendingText ->
+            if (!speechEngine.isMuted.value) {
+                speechEngine.speak(pendingText)
+            }
+        }
         checkOnboardingStatus()
-        // Single lifecycle-scoped observer to return SPEAKING -> IDLE only while ARC is powered ON
+        // Sync local TTS speaking -> IDLE transition
         viewModelScope.launch {
             speechEngine.isSpeaking.collect { speaking ->
-                if (!speaking && _isArcPoweredOn.value && _assistantStatus.value == AssistantStatus.SPEAKING) {
+                if (!speaking && _isArcPoweredOn.value && _assistantStatus.value == AssistantStatus.SPEAKING &&
+                    geminiLiveManager.sessionState.value != com.example.geminilive.GeminiLiveSessionState.SPEAKING
+                ) {
                     _assistantStatus.value = AssistantStatus.IDLE
+                }
+            }
+        }
+        // Sync Gemini Live speaking/listening state with HUD status
+        viewModelScope.launch {
+            geminiLiveManager.sessionState.collect { liveState ->
+                if (_isArcPoweredOn.value) {
+                    when (liveState) {
+                        com.example.geminilive.GeminiLiveSessionState.SPEAKING -> {
+                            _assistantStatus.value = AssistantStatus.SPEAKING
+                        }
+                        com.example.geminilive.GeminiLiveSessionState.LISTENING,
+                        com.example.geminilive.GeminiLiveSessionState.DISCONNECTED,
+                        com.example.geminilive.GeminiLiveSessionState.ERROR -> {
+                            if (_assistantStatus.value == AssistantStatus.SPEAKING && !speechEngine.isSpeaking.value) {
+                                _assistantStatus.value = AssistantStatus.IDLE
+                            }
+                        }
+                        else -> Unit
+                    }
                 }
             }
         }
@@ -206,6 +233,9 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
             _isInitializing.value = false
 
             if (isComplete && hasCompletedPermissions) {
+                if (_isGeminiLiveMode.value && geminiLiveManager.hasValidApiKey()) {
+                    geminiLiveManager.startLiveSession()
+                }
                 triggerBriefingSummary()
             } else {
                 refreshWeatherBadge()
@@ -282,11 +312,18 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Turns ARC ON: activates glowing state, starts wake-word listening, and speaks greeting/briefing.
+     * Turns ARC ON: activates glowing state, starts wake-word listening & Gemini Live (if enabled),
+     * and speaks greeting/briefing.
      */
     fun powerOnArc() {
         _isArcPoweredOn.value = true
         _assistantStatus.value = AssistantStatus.IDLE
+
+        val wantsLive = prefs.getBoolean("arc_gemini_live_mode", true)
+        _isGeminiLiveMode.value = wantsLive
+        if (wantsLive && geminiLiveManager.hasValidApiKey()) {
+            geminiLiveManager.startLiveSession()
+        }
 
         speechEngine.setWakeWordModeEnabled(true)
         prefs.edit().putBoolean("wake_word_enabled", true).apply()
@@ -304,7 +341,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Turns ARC OFF (same effect as "Good Night ARC" routine):
-     * Stops wake-word & background listening, dims avatar to static standby, and speaks farewell.
+     * Stops wake-word & background listening, pauses Live session, dims avatar, and speaks farewell.
      */
     fun powerOffArc(customFarewell: String? = null) {
         val displayName = _userName.value.ifBlank { "Boss" }
@@ -319,11 +356,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         speechEngine.stopSpeaking()
         prefs.edit().putBoolean("wake_word_enabled", false).apply()
 
-        if (_isGeminiLiveMode.value) {
-            _isGeminiLiveMode.value = false
-            prefs.edit().putBoolean("arc_gemini_live_mode", false).apply()
-            geminiLiveManager.stopLiveSession()
-        }
+        geminiLiveManager.stopLiveSession()
 
         try {
             com.example.assistant.background.AriaBackgroundWakeService.stop(getApplication())
@@ -365,6 +398,9 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
             .apply()
 
         _isPermissionsGranted.value = true
+        if (_isGeminiLiveMode.value && geminiLiveManager.hasValidApiKey()) {
+            geminiLiveManager.startLiveSession()
+        }
         triggerBriefingSummary()
 
         val logMsg = "ARIA_PERMISSIONS: Permissions setup marked complete in SharedPreferences"
@@ -483,13 +519,18 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopSpeaking() {
         speechEngine.stopSpeaking()
+        geminiLiveManager.stopCurrentPlayback()
         if (_isArcPoweredOn.value) {
             _assistantStatus.value = AssistantStatus.IDLE
         }
     }
 
     fun toggleTtsMute(): Boolean {
-        return speechEngine.toggleMute()
+        val muted = speechEngine.toggleMute()
+        if (muted) {
+            geminiLiveManager.stopCurrentPlayback()
+        }
+        return muted
     }
 
     fun setSpeechRate(rate: Float) {
@@ -511,6 +552,17 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (_isArcPoweredOn.value) {
             _assistantStatus.value = AssistantStatus.SPEAKING
+        }
+        // When Gemini Live Voice WebSocket is enabled & key is present, connect/queue and speak
+        // via Gemini Live's natural male voice (Charon) instead of overlapping legacy TTS.
+        if (_isGeminiLiveMode.value && geminiLiveManager.hasValidApiKey()) {
+            if (geminiLiveManager.sessionState.value == com.example.geminilive.GeminiLiveSessionState.DISCONNECTED) {
+                geminiLiveManager.startLiveSession()
+            }
+            if (geminiLiveManager.sendTextTurnForSpeech(text)) {
+                speechEngine.stopSpeaking()
+                return
+            }
         }
         speechEngine.speak(text)
     }

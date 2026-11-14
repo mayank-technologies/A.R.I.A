@@ -2759,7 +2759,7 @@ class AriaNewsAndSportsService {
         final matches = data['data'] as List?;
 
         if (matches == null || matches.isEmpty) {
-          return "Boss, abhi koi major live match active nahi hai. Recent matches check kar sakti hu!";
+          return "Boss, abhi koi major live match active nahi hai. Recent matches check kar sakta hu!";
         }
 
         // Find India match or any live match

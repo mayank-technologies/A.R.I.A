@@ -70,7 +70,7 @@ object MusicMoodVoiceHandler {
         return try {
             if (isAppInstalled(context, "com.spotify.music")) {
                 context.startActivity(spotifyIntent)
-                MusicMoodResult.Success("Aapke $mood mood ke liye Spotify par best tracks play kar rahi hu, Boss! 🎵")
+                MusicMoodResult.Success("Aapke $mood mood ke liye Spotify par best tracks play kar raha hu, Boss! 🎵")
             } else {
                 // Fallback to YouTube / YouTube Music search
                 val ytUrl = "https://www.youtube.com/results?search_query=${Uri.encode(queryKeyword)}"

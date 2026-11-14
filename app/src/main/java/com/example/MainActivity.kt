@@ -45,7 +45,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.assistant.screenshare.AriaScreenShareManager
+import com.example.assistant.security.AntiTheftSirenManager
+import com.example.assistant.security.SirenGuardState
 import com.example.ui.AriaViewModel
+import com.example.ui.components.AntiTheftAlertDialog
 import com.example.ui.components.AriaWebViewDialog
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.QuickToolsScreen
@@ -229,10 +232,21 @@ fun AriaMainApp(viewModel: AriaViewModel) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(0) }
     val activeWebUrl by viewModel.activeWebUrl.collectAsState()
+    val guardState by AntiTheftSirenManager.guardState.collectAsState()
+    val triggerReason by AntiTheftSirenManager.triggerReason.collectAsState()
 
     activeWebUrl?.let { url ->
         com.example.assistant.SmartAppOpener.launchExternalBrowser(context, url)
         viewModel.closeWebBrowser()
+    }
+
+    if (guardState == SirenGuardState.TRIGGERED) {
+        AntiTheftAlertDialog(
+            reason = triggerReason ?: "Unauthorized phone movement or charger unplug detected!",
+            onDisarmClick = {
+                AntiTheftSirenManager.disarmSecurity(context)
+            }
+        )
     }
 
     Scaffold(

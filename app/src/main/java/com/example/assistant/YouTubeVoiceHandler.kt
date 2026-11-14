@@ -73,7 +73,7 @@ object YouTubeVoiceHandler {
         if (searchQuery.isBlank()) {
             Log.d(TAG, "[FALLBACK] Search query is blank. Launching YouTube main app.")
             SmartAppOpener.smartLaunchApp(context, "youtube")
-            return@withContext YouTubeResult.Success("YouTube open kar rahi hu, Boss!")
+            return@withContext YouTubeResult.Success("YouTube open kar raha hu, Boss!")
         }
 
         Log.d(TAG, "[PARSED SEARCH QUERY] Extracted Topic: '$searchQuery'")

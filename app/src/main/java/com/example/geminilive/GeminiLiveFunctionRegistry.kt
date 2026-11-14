@@ -10,6 +10,12 @@ import com.example.assistant.DeviceClockHelper
 import com.example.assistant.SmartAppOpener
 import com.example.assistant.WhatsAppActionResult
 import com.example.assistant.WhatsAppContactResolver
+import com.example.assistant.accessibility.AriaAccessibilityGestureService
+import com.example.assistant.hardware.AndroidHardwareController
+import com.example.assistant.hardware.HardwareActionResult
+import com.example.assistant.security.AntiTheftSirenManager
+import com.example.assistant.whatsapp.WhatsAppAutomationManager
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -139,6 +145,58 @@ object GeminiLiveFunctionRegistry {
             put("parameters", params)
         }
 
+        // 7. controlHardware
+        val controlHardware = JSONObject().apply {
+            put("name", "controlHardware")
+            put("description", "Controls device hardware: flashlight, wifi, bluetooth, volume, brightness, or reads battery percentage.")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                val props = JSONObject().apply {
+                    propsPut("action", "STRING", "One of: flashlight_on, flashlight_off, wifi_toggle, bluetooth_toggle, volume_up, volume_down, volume_mute, brightness_up, brightness_down, battery_status")
+                }
+                put("properties", props)
+                put("required", JSONArray().apply { put("action") })
+            }
+            put("parameters", params)
+        }
+
+        // 8. toggleSecurityGuard
+        val toggleSecurityGuard = JSONObject().apply {
+            put("name", "toggleSecurityGuard")
+            put("description", "Arms or disarms ARC Anti-Theft Siren Guard (motion + charger unplug alarm + visible camera alert).")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                val props = JSONObject().apply {
+                    propsPut("armed", "BOOLEAN", "True to arm security guard, false to disarm.")
+                }
+                put("properties", props)
+                put("required", JSONArray().apply { put("armed") })
+            }
+            put("parameters", params)
+        }
+
+        // 9. readWhatsAppNotifications
+        val readWhatsAppNotifications = JSONObject().apply {
+            put("name", "readWhatsAppNotifications")
+            put("description", "Reads unread captured WhatsApp notifications aloud.")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            }
+            put("parameters", params)
+        }
+
+        // 10. readScreenVision
+        val readScreenVision = JSONObject().apply {
+            put("name", "readScreenVision")
+            put("description", "Reads current on-screen text using Accessibility tree and ML Kit OCR fallback.")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            }
+            put("parameters", params)
+        }
+
         val functionDeclarations = JSONArray().apply {
             put(openWhatsApp)
             put(openApp)
@@ -146,6 +204,10 @@ object GeminiLiveFunctionRegistry {
             put(makeCall)
             put(callContact)
             put(getCurrentDateTime)
+            put(controlHardware)
+            put(toggleSecurityGuard)
+            put(readWhatsAppNotifications)
+            put(readScreenVision)
         }
 
         val toolWrapper = JSONObject().apply {
@@ -177,6 +239,10 @@ object GeminiLiveFunctionRegistry {
             "makeCall" -> executeMakeCall(context, callId, args)
             "callContact" -> executeCallContact(context, callId, args)
             "getCurrentDateTime" -> executeGetCurrentDateTime(context, callId)
+            "controlHardware" -> executeControlHardware(context, callId, args)
+            "toggleSecurityGuard" -> executeToggleSecurityGuard(context, callId, args)
+            "readWhatsAppNotifications" -> executeReadWhatsAppNotifications(context, callId)
+            "readScreenVision" -> executeReadScreenVision(callId)
             else -> {
                 Log.w(TAG, "Unknown tool call: $functionName")
                 ToolExecutionOutput(
@@ -420,6 +486,124 @@ object GeminiLiveFunctionRegistry {
                 put("isoLocal", clockInfo.isoLocalTimestamp)
             },
             verbalConfirmation = "Boss, abhi ${clockInfo.formattedTime} hua hai (${clockInfo.formattedDate})."
+        )
+    }
+
+    private fun executeControlHardware(context: Context, callId: String, args: JSONObject): ToolExecutionOutput {
+        val action = args.optString("action", "")
+        val message: String
+        var success = true
+
+        when (action) {
+            "flashlight_on" -> {
+                val res = AndroidHardwareController.setTorchMode(context, true)
+                success = res is HardwareActionResult.Success
+                message = when (res) { is HardwareActionResult.Success -> res.message; is HardwareActionResult.Failure -> res.message }
+            }
+            "flashlight_off" -> {
+                val res = AndroidHardwareController.setTorchMode(context, false)
+                success = res is HardwareActionResult.Success
+                message = when (res) { is HardwareActionResult.Success -> res.message; is HardwareActionResult.Failure -> res.message }
+            }
+            "wifi_toggle" -> {
+                val res = AndroidHardwareController.openWifiControl(context)
+                success = res is HardwareActionResult.Success
+                message = when (res) { is HardwareActionResult.Success -> res.message; is HardwareActionResult.Failure -> res.message }
+            }
+            "bluetooth_toggle" -> {
+                val res = AndroidHardwareController.openBluetoothControl(context)
+                success = res is HardwareActionResult.Success
+                message = when (res) { is HardwareActionResult.Success -> res.message; is HardwareActionResult.Failure -> res.message }
+            }
+            "volume_up" -> {
+                val res = AndroidHardwareController.adjustVolume(context, true)
+                success = res is HardwareActionResult.Success
+                message = when (res) { is HardwareActionResult.Success -> res.message; is HardwareActionResult.Failure -> res.message }
+            }
+            "volume_down" -> {
+                val res = AndroidHardwareController.adjustVolume(context, false)
+                success = res is HardwareActionResult.Success
+                message = when (res) { is HardwareActionResult.Success -> res.message; is HardwareActionResult.Failure -> res.message }
+            }
+            "volume_mute" -> {
+                val res = AndroidHardwareController.setVolumeExtreme(context, mute = true)
+                success = res is HardwareActionResult.Success
+                message = when (res) { is HardwareActionResult.Success -> res.message; is HardwareActionResult.Failure -> res.message }
+            }
+            "brightness_up" -> {
+                val res = AndroidHardwareController.adjustBrightness(context, directionUp = true)
+                success = res is HardwareActionResult.Success
+                message = when (res) { is HardwareActionResult.Success -> res.message; is HardwareActionResult.Failure -> res.message }
+            }
+            "brightness_down" -> {
+                val res = AndroidHardwareController.adjustBrightness(context, directionUp = false)
+                success = res is HardwareActionResult.Success
+                message = when (res) { is HardwareActionResult.Success -> res.message; is HardwareActionResult.Failure -> res.message }
+            }
+            "battery_status" -> {
+                message = AndroidHardwareController.getBatteryTelemetry(context)
+            }
+            else -> {
+                success = false
+                message = "Unknown hardware action: $action"
+            }
+        }
+
+        return ToolExecutionOutput(
+            callId = callId,
+            toolName = "controlHardware",
+            success = success,
+            responseData = JSONObject().apply { put("action", action); put("message", message) },
+            verbalConfirmation = message
+        )
+    }
+
+    private fun executeToggleSecurityGuard(context: Context, callId: String, args: JSONObject): ToolExecutionOutput {
+        val armed = args.optBoolean("armed", true)
+        val msg = if (armed) {
+            AntiTheftSirenManager.armSecurity(context)
+        } else {
+            AntiTheftSirenManager.disarmSecurity(context)
+        }
+        return ToolExecutionOutput(
+            callId = callId,
+            toolName = "toggleSecurityGuard",
+            success = true,
+            responseData = JSONObject().apply { put("armed", armed); put("message", msg) },
+            verbalConfirmation = msg
+        )
+    }
+
+    private fun executeReadWhatsAppNotifications(context: Context, callId: String): ToolExecutionOutput {
+        if (!WhatsAppAutomationManager.isNotificationAccessGranted(context)) {
+            WhatsAppAutomationManager.openNotificationAccessSettings(context)
+            val msg = "Notification Access permission enabled nahi hai. Maine settings screen khol di hai."
+            return ToolExecutionOutput(
+                callId = callId,
+                toolName = "readWhatsAppNotifications",
+                success = false,
+                responseData = JSONObject().apply { put("status", "permission_required") },
+                verbalConfirmation = msg
+            )
+        }
+        val summary = WhatsAppAutomationManager.getUnreadWhatsAppMessagesSummary()
+        return ToolExecutionOutput(
+            callId = callId,
+            toolName = "readWhatsAppNotifications",
+            success = true,
+            responseData = JSONObject().apply { put("summary", summary) },
+            verbalConfirmation = summary
+        )
+    }
+
+    private fun executeReadScreenVision(callId: String): ToolExecutionOutput {
+        val text = runBlocking { AriaAccessibilityGestureService.readScreenContentSuspend() }
+        return ToolExecutionOutput(
+            callId = callId,
+            toolName = "readScreenVision",
+            success = true,
+            responseData = JSONObject().apply { put("screenText", text) },
+            verbalConfirmation = text
         )
     }
 }

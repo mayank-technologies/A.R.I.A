@@ -32,11 +32,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MarkChatUnread
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.OpenInNew
@@ -51,6 +54,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -68,6 +72,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.assistant.whatsapp.WhatsAppAutomationManager
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.DeepSpace
 import com.example.ui.theme.ElectricEmerald
@@ -86,7 +94,8 @@ data class PermissionItemInfo(
     val explanation: String,
     val icon: ImageVector,
     val manifestPermissions: List<String>,
-    val isBatteryOptimization: Boolean = false
+    val isBatteryOptimization: Boolean = false,
+    val isNotificationAccess: Boolean = false
 )
 
 @Composable
@@ -151,6 +160,30 @@ fun MandatoryPermissionsScreen(
                 }
             ),
             PermissionItemInfo(
+                id = "camera",
+                title = "Camera & Flashlight",
+                explanation = "Torch on/off aur Anti-Theft Guard ke visible front-camera alert snapshot ke liye",
+                icon = Icons.Default.CameraAlt,
+                manifestPermissions = listOf(Manifest.permission.CAMERA)
+            ),
+            PermissionItemInfo(
+                id = "bluetooth",
+                title = "Bluetooth Control",
+                explanation = "Voice command se Bluetooth on/off panel kholne ke liye",
+                icon = Icons.Default.Bluetooth,
+                manifestPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    listOf(Manifest.permission.BLUETOOTH_CONNECT)
+                } else emptyList()
+            ),
+            PermissionItemInfo(
+                id = "notification_access",
+                title = "WhatsApp Notification Access",
+                explanation = "Unread WhatsApp messages padhkar voice me sunane ke liye Settings > Notification Access me ARC enable karein",
+                icon = Icons.Default.MarkChatUnread,
+                manifestPermissions = emptyList(),
+                isNotificationAccess = true
+            ),
+            PermissionItemInfo(
                 id = "battery",
                 title = "Background Execution",
                 explanation = "Background reminders aur instant voice assistant readiness ke liye",
@@ -159,7 +192,7 @@ fun MandatoryPermissionsScreen(
                 isBatteryOptimization = true
             )
         )
-        list.filter { it.manifestPermissions.isNotEmpty() || it.isBatteryOptimization }
+        list.filter { it.manifestPermissions.isNotEmpty() || it.isBatteryOptimization || it.isNotificationAccess }
     }
 
     // Map to keep track of permission status (Granted = true, Pending/Denied = false)
@@ -169,6 +202,9 @@ fun MandatoryPermissionsScreen(
 
     // Helper function to check if a specific permission item is granted
     fun checkItemGranted(item: PermissionItemInfo): Boolean {
+        if (item.isNotificationAccess) {
+            return WhatsAppAutomationManager.isNotificationAccessGranted(context)
+        }
         if (item.isBatteryOptimization) {
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -184,20 +220,35 @@ fun MandatoryPermissionsScreen(
 
     // Refresh all permission statuses
     fun refreshPermissions() {
-        var allGranted = true
+        var allRuntimeGranted = true
         permissionList.forEach { item ->
             val granted = checkItemGranted(item)
             permissionStates[item.id] = granted
-            if (!granted) allGranted = false
+            if (!granted && !item.isNotificationAccess && !item.isBatteryOptimization) {
+                allRuntimeGranted = false
+            }
         }
-        if (hasAttemptedRequest && !allGranted) {
+        if (hasAttemptedRequest && !allRuntimeGranted) {
             showDenialWarning = true
-        } else if (allGranted) {
+        } else if (allRuntimeGranted) {
             showDenialWarning = false
         }
     }
 
-    // Check permissions on screen load
+    // Check permissions on screen load & whenever returning from System Settings
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshPermissions()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     LaunchedEffect(Unit) {
         refreshPermissions()
     }
@@ -255,6 +306,9 @@ fun MandatoryPermissionsScreen(
     val totalCount = permissionList.size
     val grantedCount = permissionList.count { permissionStates[it.id] == true }
     val isAllGranted = grantedCount == totalCount
+    val isCoreRuntimeGranted = permissionList
+        .filter { !it.isNotificationAccess && !it.isBatteryOptimization }
+        .all { permissionStates[it.id] == true }
 
     Box(
         modifier = Modifier
@@ -511,7 +565,9 @@ fun MandatoryPermissionsScreen(
                                 Button(
                                     onClick = {
                                         hasAttemptedRequest = true
-                                        if (item.isBatteryOptimization) {
+                                        if (item.isNotificationAccess) {
+                                            WhatsAppAutomationManager.openNotificationAccessSettings(context)
+                                        } else if (item.isBatteryOptimization) {
                                             try {
                                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                                                     val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
@@ -533,7 +589,11 @@ fun MandatoryPermissionsScreen(
                                     shape = RoundedCornerShape(20.dp),
                                     modifier = Modifier.height(34.dp)
                                 ) {
-                                    Text("Allow", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = if (item.isNotificationAccess) "Settings" else "Allow",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }
@@ -577,7 +637,7 @@ fun MandatoryPermissionsScreen(
                     onClick = {
                         // Refresh to make sure current state is up to date
                         refreshPermissions()
-                        if (isAllGranted) {
+                        if (isCoreRuntimeGranted) {
                             onPermissionsCompleted()
                         } else {
                             hasAttemptedRequest = true
@@ -587,18 +647,18 @@ fun MandatoryPermissionsScreen(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isAllGranted) ElectricEmerald else SurfaceDark,
-                        contentColor = if (isAllGranted) DeepSpace else TextPrimary
+                        containerColor = if (isCoreRuntimeGranted) ElectricEmerald else SurfaceDark,
+                        contentColor = if (isCoreRuntimeGranted) DeepSpace else TextPrimary
                     ),
                     shape = RoundedCornerShape(12.dp),
-                    border = if (!isAllGranted) androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.5f)) else null,
+                    border = if (!isCoreRuntimeGranted) androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.5f)) else null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp)
                         .testTag("continue_to_app_button")
                 ) {
                     Text(
-                        text = if (isAllGranted) "CONTINUE TO ARC HOME 🚀" else "GRANT & PROCEED",
+                        text = if (isCoreRuntimeGranted) "CONTINUE TO ARC HOME 🚀" else "GRANT & PROCEED",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp

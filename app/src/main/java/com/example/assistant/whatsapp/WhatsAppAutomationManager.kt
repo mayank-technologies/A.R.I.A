@@ -49,6 +49,8 @@ object WhatsAppAutomationManager {
     private var currentVoiceNoteFile: File? = null
     private var isRecording = false
 
+    fun isRecordingActive(): Boolean = isRecording
+
     /**
      * Checks if Notification Listener access is granted for this app.
      */

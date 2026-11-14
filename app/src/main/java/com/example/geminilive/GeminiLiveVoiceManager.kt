@@ -44,19 +44,14 @@ enum class GeminiLiveSessionState {
  * GeminiLiveVoiceManager:
  * Full-duplex bidirectional voice-to-voice streaming engine for ARC using the Gemini Live Multimodal WebSocket API.
  *
- * Core Capabilities:
- * 1. Automatic Multi-Language Detection:
- *    - Seamlessly supports Hindi, English, Hinglish, Marathi, Gujarati, Bengali, Tamil, Telugu,
- *      Kannada, Malayalam, Punjabi, Urdu without manual selection.
- *    - Handles mid-conversation language switching on the fly.
- * 2. Whitelisted Native Function-Calling:
- *    - When user asks to call, open app, or launch WhatsApp, Gemini generates a `toolCall`.
- *    - The function is executed securely via GeminiLiveFunctionRegistry on native Android.
- *    - The response is sent back via `toolResponse` in the same WebSocket stream, and ARC verbally confirms in natural voice.
- * 3. High-Fidelity Audio Streaming:
- *    - Captures PCM 16-bit 16kHz audio from Android microphone.
- *    - Plays back PCM 24kHz audio directly via low-latency Android AudioTrack.
- *    - Zero device SpeechSynthesis needed for voice output.
+ * MIGRATION FROM LEGACY TTS/VOICE-OUTPUT:
+ * Step 1 (API Key Config): Set `GEMINI_API_KEY` in the AI Studio Secrets panel (injected via Secrets Gradle Plugin -> BuildConfig.GEMINI_API_KEY).
+ * Step 2 (Audio Pipeline): AudioRecord captures 16kHz 16-bit mono PCM chunks -> Base64 -> WebSocket `realtimeInput`.
+ * Step 3 (Native Voice Output): Gemini streams 24kHz 16-bit mono PCM audio back -> decoded and played directly via AudioTrack (`USAGE_ASSISTANT`),
+ *        replacing ElevenLabs / Android TextToSpeech whenever Gemini Live mode is active.
+ * Step 4 (Warm Natural Male Voice): Configured with `"Charon"` in `prebuiltVoiceConfig` (plus `enableAffectiveDialog = true`) for a calm, warm, emotionally expressive male voice.
+ * Step 5 (Auto Multi-Language): System instructions enable seamless auto-detection and mid-conversation switching across
+ *        Hindi, English, Hinglish, Marathi, Gujarati, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi, and Urdu.
  */
 class GeminiLiveVoiceManager(private val context: Context) {
 
@@ -64,6 +59,23 @@ class GeminiLiveVoiceManager(private val context: Context) {
         private const val TAG = "GEMINI_LIVE_VOICE"
         private const val HOST = "generativelanguage.googleapis.com"
         private const val PATH = "/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
+
+        // Native Audio Live model required for Affective Dialog (emotional/expressive speech)
+        private const val LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+        private const val FALLBACK_LIVE_MODEL = "models/gemini-2.0-flash-exp"
+
+        /**
+         * TO TRY ANOTHER MALE VOICE, CHANGE THIS SINGLE CONSTANT:
+         * - "Charon"  -> Informative, calm, warm-professional lower male (JARVIS-style, recommended)
+         * - "Fenrir"  -> Passionate, energetic, expressive lower-middle male
+         * - "Puck"    -> Upbeat, lively, friendly male
+         * - "Orus"    -> Firm, composed, steady lower-middle male
+         * - "Achird"  -> Friendly, conversational male
+         * - "Algenib" -> Textured, gravelly deeper male
+         * - "Alnilam" -> Confident, firm lower-middle male
+         */
+        const val SELECTED_VOICE_NAME = "Charon"
+
         private const val SAMPLE_RATE_IN = 16000
         private const val SAMPLE_RATE_OUT = 24000
     }
@@ -74,6 +86,24 @@ class GeminiLiveVoiceManager(private val context: Context) {
     private var audioTrack: AudioTrack? = null
 
     private var recordJob: Job? = null
+
+    @Volatile
+    private var isSetupComplete = false
+
+    @Volatile
+    private var usingFallbackModel = false
+
+    private val pendingSpeechTurns = mutableListOf<String>()
+    private var onFallbackSpeechNeeded: ((String) -> Unit)? = null
+
+    fun setOnFallbackSpeechListener(listener: (String) -> Unit) {
+        onFallbackSpeechNeeded = listener
+    }
+
+    fun hasValidApiKey(): Boolean {
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        return apiKey.isNotBlank() && apiKey != "MY_GEMINI_API_KEY"
+    }
 
     private val _sessionState = MutableStateFlow(GeminiLiveSessionState.DISCONNECTED)
     val sessionState: StateFlow<GeminiLiveSessionState> = _sessionState.asStateFlow()
@@ -97,33 +127,43 @@ class GeminiLiveVoiceManager(private val context: Context) {
      * Initializes and starts a Gemini Live Voice streaming session.
      */
     fun startLiveSession() {
-        if (_sessionState.value == GeminiLiveSessionState.CONNECTED || _sessionState.value == GeminiLiveSessionState.CONNECTING) {
+        if (_sessionState.value == GeminiLiveSessionState.CONNECTED ||
+            _sessionState.value == GeminiLiveSessionState.CONNECTING ||
+            _sessionState.value == GeminiLiveSessionState.LISTENING ||
+            _sessionState.value == GeminiLiveSessionState.SPEAKING
+        ) {
             Log.d(TAG, "Gemini Live session already active or connecting")
             return
         }
 
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
+        if (!hasValidApiKey()) {
             Log.e(TAG, "Valid GEMINI_API_KEY is missing in BuildConfig (.env).")
             _sessionState.value = GeminiLiveSessionState.ERROR
-            _liveTranscript.value = "Gemini API Key missing. Please set GEMINI_API_KEY in Secrets panel."
+            _liveTranscript.value = "Gemini API Key missing. Using male fallback TTS."
+            drainPendingToFallback()
             return
         }
 
+        usingFallbackModel = false
+        isSetupComplete = false
         _sessionState.value = GeminiLiveSessionState.CONNECTING
-        _liveTranscript.value = "Connecting to Gemini Live Voice Stream..."
+        _liveTranscript.value = "Connecting to Gemini Live Male Voice (Charon)..."
 
         initAudioTrack()
+        openWebSocketConnection()
+    }
 
+    private fun openWebSocketConnection() {
+        val apiKey = BuildConfig.GEMINI_API_KEY
         val url = "wss://$HOST$PATH?key=$apiKey"
         val request = Request.Builder().url(url).build()
+        isSetupComplete = false
 
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d(TAG, "Gemini Live WebSocket Connected successfully!")
+                Log.d(TAG, "Gemini Live WebSocket Opened (fallback=$usingFallbackModel)")
                 _sessionState.value = GeminiLiveSessionState.CONNECTED
-                sendInitialHandshakeSetup(webSocket)
-                startMicStreaming(webSocket)
+                sendInitialHandshakeSetup(webSocket, useFallbackModel = usingFallbackModel)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -131,43 +171,67 @@ class GeminiLiveVoiceManager(private val context: Context) {
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                // Incoming binary PCM chunks
                 playRawPcm(bytes.toByteArray())
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "Gemini Live WebSocket Error: ${t.message}", t)
+                if (!isSetupComplete && !usingFallbackModel) {
+                    Log.w(TAG, "Retrying Gemini Live with fallback model $FALLBACK_LIVE_MODEL")
+                    usingFallbackModel = true
+                    openWebSocketConnection()
+                    return
+                }
                 _sessionState.value = GeminiLiveSessionState.ERROR
                 _liveTranscript.value = "Live Voice disconnected: ${t.localizedMessage ?: "Network error"}"
-                stopLiveSession()
+                drainPendingToFallback()
+                releaseAudioHardware()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d(TAG, "Gemini Live WebSocket closed ($code: $reason)")
+                if (!isSetupComplete && !usingFallbackModel && code != 1000) {
+                    Log.w(TAG, "Setup closed early ($code: $reason). Retrying with fallback model $FALLBACK_LIVE_MODEL")
+                    usingFallbackModel = true
+                    openWebSocketConnection()
+                    return
+                }
                 _sessionState.value = GeminiLiveSessionState.DISCONNECTED
                 _micVolumeLevel.value = 0f
+                drainPendingToFallback()
             }
         })
     }
 
     /**
-     * Sends the Live Bidi Setup message configuring multimodal model, voice parameters,
-     * multi-language instructions, and Whitelisted Function Calling definitions.
+     * Sends the Live Bidi Setup message configuring native-audio model, male voice parameters,
+     * Affective Dialog expressiveness, multi-language/tone instructions, and Function Calling.
      */
-    private fun sendInitialHandshakeSetup(ws: WebSocket) {
+    private fun sendInitialHandshakeSetup(ws: WebSocket, useFallbackModel: Boolean = false) {
+        val modelToUse = if (useFallbackModel) FALLBACK_LIVE_MODEL else LIVE_MODEL
         val setupJson = JSONObject().apply {
             val setupObj = JSONObject().apply {
-                put("model", "models/gemini-2.0-flash-exp")
+                put("model", modelToUse)
+
+                if (!useFallbackModel) {
+                    // Top-level Affective Dialog flag (v1alpha): enables real-time emotional/acoustic
+                    // adaptation so speech responds with natural warmth and expression instead of flat/robotic delivery.
+                    put("enableAffectiveDialog", true)
+                    // Request live transcripts alongside native AUDIO stream
+                    put("inputAudioTranscription", JSONObject())
+                    put("outputAudioTranscription", JSONObject())
+                }
 
                 val generationConfig = JSONObject().apply {
+                    // Native-audio models stream AUDIO natively (transcripts arrive via outputAudioTranscription)
                     put("responseModalities", JSONArray().apply {
                         put("AUDIO")
-                        put("TEXT")
                     })
                     val speechConfig = JSONObject().apply {
                         val voiceConfig = JSONObject().apply {
                             val prebuiltVoiceConfig = JSONObject().apply {
-                                put("voiceName", "Aoede") // Energetic, crisp high-tech voice
+                                // Uses SELECTED_VOICE_NAME ("Charon") defined in companion object above
+                                put("voiceName", SELECTED_VOICE_NAME)
                             }
                             put("prebuiltVoiceConfig", prebuiltVoiceConfig)
                         }
@@ -177,7 +241,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 }
                 put("generationConfig", generationConfig)
 
-                // Multi-Language & Verbal Confirmation System Instruction
+                // Multi-Language, Expressive Tone & Verbal Confirmation System Instruction
                 val clockSnapshot = DeviceClockHelper.getCurrentDeviceClockInfo(
                     context = context,
                     logDebug = true,
@@ -187,8 +251,12 @@ class GeminiLiveVoiceManager(private val context: Context) {
                     val parts = JSONArray().apply {
                         put(JSONObject().apply {
                             put("text", """
-                                You are ARC (Autonomous Reactive Core), a high-tech JARVIS-grade personal voice assistant.
+                                You are ARC (Autonomous Reactive Core), a high-tech JARVIS-grade personal male voice assistant.
                                 Session start device local time: ${clockSnapshot.formattedTime}, ${clockSnapshot.formattedDate} (${clockSnapshot.timeZoneId}).
+                                
+                                VOICE DELIVERY & EMOTIONAL EXPRESSION:
+                                Speak naturally with warmth and subtle emotional expression — not flat or robotic, vary pitch/pace based on context (calm for info, energetic for greetings).
+                                Sound like a genuinely attentive human companion: add natural conversational cadence, gentle emphasis on key words, and warm reassurance when helping. Use natural masculine Hindi/Hinglish grammar when speaking Hindi or Hinglish (e.g., "kar raha hu", "bata raha hu").
                                 
                                 CRITICAL MULTI-LANGUAGE INSTRUCTIONS:
                                 1. Automatically detect the user's spoken language: Hindi, English, Hinglish, Marathi, Gujarati, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi, or Urdu.
@@ -197,10 +265,10 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                 4. Keep spoken responses concise, articulate, and respectful (2-3 sentences max).
                                 
                                 FUNCTION-CALLING & CALL CONFIRMATION RULES:
-                                1. Use the provided tools (openWhatsApp, openApp, openUrl, makeCall, callContact, getCurrentDateTime) whenever user expresses an action intent or asks the current time/date.
+                                1. Use the provided tools (openWhatsApp, openApp, openUrl, makeCall, callContact, getCurrentDateTime, controlHardware, toggleSecurityGuard, readWhatsAppNotifications, readScreenVision) whenever user expresses an action intent or asks the current time/date.
                                 2. ALWAYS call getCurrentDateTime before stating the current time or date so you never guess or give a stale/wrong time.
                                 3. NEVER execute arbitrary code. ONLY trigger the declared tools.
-                                4. When calling someone: Verbally acknowledge immediately (e.g. "Calling Mom, Boss", "Rahul ko call laga rahi hu") before or during the tool call.
+                                4. When calling someone: Verbally acknowledge immediately (e.g. "Calling Mom, Boss", "Rahul ko call laga raha hu") before or during the tool call.
                                 5. If a tool fails or reports an error, state the TRUTH to the user politely. NEVER pretend an action succeeded when it failed.
                                 6. If contact matching yields multiple possibilities, explicitly ask user for clarification (e.g., 'kaunsa Rahul - Sharma ya Verma?').
                             """.trimIndent())
@@ -210,26 +278,130 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 }
                 put("systemInstruction", systemInstruction)
 
-                // Whitelisted Tools (openWhatsApp, openApp, openUrl, makeCall, callContact)
+                // Whitelisted Tools
                 put("tools", GeminiLiveFunctionRegistry.getToolsDeclarationJson())
             }
             put("setup", setupObj)
         }
 
         ws.send(setupJson.toString())
-        Log.d(TAG, "Sent Gemini Live Handshake Setup with Function Declarations")
+        Log.d(TAG, "Sent Gemini Live Handshake Setup (voice=$SELECTED_VOICE_NAME, affectiveDialog=true)")
     }
 
     /**
-     * Parses incoming JSON from Gemini Live session (Text, ToolCall, Audio, ServerTurn).
+     * Checks whether the WebSocket stream is actively connected and ready for voice output.
+     */
+    fun isStreamActive(): Boolean {
+        return webSocket != null && (
+            _sessionState.value == GeminiLiveSessionState.CONNECTED ||
+                _sessionState.value == GeminiLiveSessionState.LISTENING ||
+                _sessionState.value == GeminiLiveSessionState.SPEAKING
+            )
+    }
+
+    /**
+     * Sends a text result over the active Gemini Live WebSocket so Gemini speaks it aloud
+     * using the configured warm-natural male voice (SELECTED_VOICE_NAME), replacing legacy TTS.
+     * Buffers turns queued while setupComplete is still arriving.
+     */
+    fun sendTextTurnForSpeech(responseText: String): Boolean {
+        if (responseText.isBlank() || !hasValidApiKey()) return false
+        val ws = webSocket
+
+        // If connecting/awaiting setupComplete, buffer turn and flush once handshake finishes
+        if (!isSetupComplete || ws == null || !isStreamActive()) {
+            if (_sessionState.value == GeminiLiveSessionState.CONNECTING ||
+                _sessionState.value == GeminiLiveSessionState.CONNECTED
+            ) {
+                synchronized(pendingSpeechTurns) {
+                    pendingSpeechTurns.add(responseText)
+                }
+                Log.d(TAG, "Queued speech turn until Gemini Live setupComplete (${responseText.take(40)}...)")
+                return true
+            }
+            return false
+        }
+
+        return dispatchTextTurnToWebSocket(ws, responseText)
+    }
+
+    private fun dispatchTextTurnToWebSocket(ws: WebSocket, responseText: String): Boolean {
+        val payload = JSONObject().apply {
+            val clientContent = JSONObject().apply {
+                val turns = JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("parts", JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("text", "Read this status/response aloud concisely in a warm natural male voice without adding extra details: $responseText")
+                            })
+                        })
+                    })
+                }
+                put("turns", turns)
+                put("turnComplete", true)
+            }
+            put("clientContent", clientContent)
+        }
+
+        return try {
+            ws.send(payload.toString())
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send text turn to Gemini Live: ${e.message}")
+            false
+        }
+    }
+
+    private fun drainPendingToFallback() {
+        val pendingCopy: List<String>
+        synchronized(pendingSpeechTurns) {
+            pendingCopy = pendingSpeechTurns.toList()
+            pendingSpeechTurns.clear()
+        }
+        pendingCopy.lastOrNull()?.let { latest ->
+            onFallbackSpeechNeeded?.invoke(latest)
+        }
+    }
+
+    /**
+     * Parses incoming JSON from Gemini Live session (setupComplete, Text, ToolCall, Audio, ServerTurn).
      */
     private fun handleIncomingGeminiMessage(ws: WebSocket, jsonString: String) {
         try {
             val root = JSONObject(jsonString)
 
+            // 0. Server setupComplete acknowledgment -> start mic streaming & flush queued speech
+            if (root.has("setupComplete")) {
+                isSetupComplete = true
+                Log.d(TAG, "Gemini Live setupComplete received (voice=$SELECTED_VOICE_NAME, fallback=$usingFallbackModel)")
+                startMicStreaming(ws)
+                val queued: List<String>
+                synchronized(pendingSpeechTurns) {
+                    queued = pendingSpeechTurns.toList()
+                    pendingSpeechTurns.clear()
+                }
+                queued.forEach { text ->
+                    dispatchTextTurnToWebSocket(ws, text)
+                }
+                return
+            }
+
             // 1. Check for Server Turn Content (Audio chunks + Live Transcript)
+            val rootTranscription = root.optJSONObject("outputTranscription")?.optString("text", "")
+            if (!rootTranscription.isNullOrBlank()) {
+                _liveTranscript.value = rootTranscription
+                Log.d(TAG, "Gemini Output Transcription: $rootTranscription")
+            }
+
             val serverContent = root.optJSONObject("serverContent")
             if (serverContent != null) {
+                val serverTranscription = serverContent.optJSONObject("outputTranscription")?.optString("text", "")
+                if (!serverTranscription.isNullOrBlank()) {
+                    _liveTranscript.value = serverTranscription
+                    Log.d(TAG, "Gemini Output Transcription: $serverTranscription")
+                }
+
                 val modelTurn = serverContent.optJSONObject("modelTurn")
                 if (modelTurn != null) {
                     val parts = modelTurn.optJSONArray("parts")
@@ -454,10 +626,19 @@ class GeminiLiveVoiceManager(private val context: Context) {
         }
     }
 
-    /**
-     * Gracefully stops the Gemini Live Voice session and releases native audio hardware.
-     */
-    fun stopLiveSession() {
+    fun stopCurrentPlayback() {
+        try {
+            audioTrack?.pause()
+            audioTrack?.flush()
+            audioTrack?.play()
+            if (isSetupComplete) {
+                _sessionState.value = GeminiLiveSessionState.LISTENING
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun releaseAudioHardware() {
         try {
             recordJob?.cancel()
             recordJob = null
@@ -469,7 +650,20 @@ class GeminiLiveVoiceManager(private val context: Context) {
             audioTrack?.stop()
             audioTrack?.release()
             audioTrack = null
+        } catch (_: Exception) {
+        }
+    }
 
+    /**
+     * Gracefully stops the Gemini Live Voice session and releases native audio hardware.
+     */
+    fun stopLiveSession() {
+        try {
+            isSetupComplete = false
+            synchronized(pendingSpeechTurns) {
+                pendingSpeechTurns.clear()
+            }
+            releaseAudioHardware()
             webSocket?.close(1000, "User stopped session")
             webSocket = null
         } catch (e: Exception) {

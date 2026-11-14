@@ -416,19 +416,19 @@ object SmartAppOpener {
                         AppLaunchResult.NativeAppOpened(matchedTarget.appName, msg)
                     } else {
                         launchExternalBrowser(context, matchedTarget.fallbackUrl)
-                        val msg = "${matchedTarget.appName} launch intent null tha. External Chrome browser me open kar rahi hu, Boss!"
+                        val msg = "${matchedTarget.appName} launch intent null tha. External Chrome browser me open kar raha hu, Boss!"
                         Log.d(TAG, "[DECISION] Launch intent null -> Launching Browser URL '${matchedTarget.fallbackUrl}'")
                         AppLaunchResult.ExternalBrowserOpened(matchedTarget.appName, matchedTarget.fallbackUrl, msg)
                     }
                 } catch (e: Exception) {
                     launchExternalBrowser(context, matchedTarget.fallbackUrl)
-                    val msg = "${matchedTarget.appName} open karte waqt error aaya. Browser me open kar rahi hu."
+                    val msg = "${matchedTarget.appName} open karte waqt error aaya. Browser me open kar raha hu."
                     Log.e(TAG, "[DECISION ERROR] Failed to start activity for ${matchedTarget.packageName}", e)
                     AppLaunchResult.ExternalBrowserOpened(matchedTarget.appName, matchedTarget.fallbackUrl, msg)
                 }
             } else {
                 launchExternalBrowser(context, matchedTarget.fallbackUrl)
-                val msg = "${matchedTarget.appName} app device me installed nahi hai. External Chrome browser me web version open kar rahi hu, Boss!"
+                val msg = "${matchedTarget.appName} app device me installed nahi hai. External Chrome browser me web version open kar raha hu, Boss!"
                 Log.d(TAG, "[DECISION] App Not Installed -> LAUNCHING EXTERNAL BROWSER '${matchedTarget.fallbackUrl}'")
                 return AppLaunchResult.ExternalBrowserOpened(matchedTarget.appName, matchedTarget.fallbackUrl, msg)
             }
@@ -439,7 +439,7 @@ object SmartAppOpener {
         val searchUrl = "https://www.google.com/search?q=$encodedQuery"
         launchExternalBrowser(context, searchUrl)
 
-        val unknownMsg = "Sorry, main '$cleanQuery' app ko nahi jaanti. Chrome browser me Google search kar rahi hu."
+        val unknownMsg = "Sorry, main '$cleanQuery' app ko nahi jaanta. Chrome browser me Google search kar raha hu."
         Log.d(TAG, "[DECISION] App Not Found Anywhere -> LAUNCHING GOOGLE SEARCH IN CHROME '$searchUrl'")
         return AppLaunchResult.ExternalBrowserOpened(cleanQuery, searchUrl, unknownMsg)
     }

@@ -7,10 +7,12 @@ import android.util.Log
 import com.example.api.GeminiClient
 import com.example.api.WeatherClient
 import com.example.api.WikipediaClient
+import com.example.assistant.AriaScreenLockManager
 import com.example.assistant.battery.AriaBatterySaverManager
 import com.example.data.AriaDao
 import com.example.data.ReminderEntity
 import com.example.data.VoiceHistoryEntity
+import com.google.mlkit.nl.translate.TranslateLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -65,7 +67,7 @@ class AriaCommandProcessor(
             return@withContext AriaCommandResult.TextResponse(reply, "SECURITY")
         }
 
-        // 0.41 Hardware Controls: Flashlight, Volume, WiFi, Bluetooth, Battery Telemetry
+        // 0.41 Hardware Controls: Flashlight, Volume (up/down/mute/full), Brightness, WiFi, Bluetooth, Battery
         if (queryLower.contains("flashlight on") || queryLower.contains("torch on") || queryLower.contains("torch jalao")) {
             val res = com.example.assistant.hardware.AndroidHardwareController.setTorchMode(context, true)
             val msg = when (res) { is com.example.assistant.hardware.HardwareActionResult.Success -> res.message; is com.example.assistant.hardware.HardwareActionResult.Failure -> res.message }
@@ -73,6 +75,16 @@ class AriaCommandProcessor(
             return@withContext AriaCommandResult.TextResponse(msg, "HARDWARE")
         } else if (queryLower.contains("flashlight off") || queryLower.contains("torch off") || queryLower.contains("torch band")) {
             val res = com.example.assistant.hardware.AndroidHardwareController.setTorchMode(context, false)
+            val msg = when (res) { is com.example.assistant.hardware.HardwareActionResult.Success -> res.message; is com.example.assistant.hardware.HardwareActionResult.Failure -> res.message }
+            saveHistory(userQuery, msg, "HARDWARE")
+            return@withContext AriaCommandResult.TextResponse(msg, "HARDWARE")
+        } else if (queryLower.contains("volume mute") || queryLower.contains("awaaz band") || queryLower.contains("mute volume")) {
+            val res = com.example.assistant.hardware.AndroidHardwareController.setVolumeExtreme(context, mute = true)
+            val msg = when (res) { is com.example.assistant.hardware.HardwareActionResult.Success -> res.message; is com.example.assistant.hardware.HardwareActionResult.Failure -> res.message }
+            saveHistory(userQuery, msg, "HARDWARE")
+            return@withContext AriaCommandResult.TextResponse(msg, "HARDWARE")
+        } else if (queryLower.contains("full volume") || queryLower.contains("max volume") || queryLower.contains("volume full")) {
+            val res = com.example.assistant.hardware.AndroidHardwareController.setVolumeExtreme(context, mute = false)
             val msg = when (res) { is com.example.assistant.hardware.HardwareActionResult.Success -> res.message; is com.example.assistant.hardware.HardwareActionResult.Failure -> res.message }
             saveHistory(userQuery, msg, "HARDWARE")
             return@withContext AriaCommandResult.TextResponse(msg, "HARDWARE")
@@ -86,23 +98,83 @@ class AriaCommandProcessor(
             val msg = when (res) { is com.example.assistant.hardware.HardwareActionResult.Success -> res.message; is com.example.assistant.hardware.HardwareActionResult.Failure -> res.message }
             saveHistory(userQuery, msg, "HARDWARE")
             return@withContext AriaCommandResult.TextResponse(msg, "HARDWARE")
+        } else if (queryLower.contains("brightness") || queryLower.contains("roshni") || queryLower.contains("screen light")) {
+            val pctMatch = Regex("(\\d{1,3})\\s*%?").find(queryLower)?.groupValues?.get(1)?.toIntOrNull()
+            val res = when {
+                pctMatch != null && pctMatch in 1..100 ->
+                    com.example.assistant.hardware.AndroidHardwareController.adjustBrightness(context, targetPercent = pctMatch)
+                queryLower.contains("kam") || queryLower.contains("down") || queryLower.contains("low") || queryLower.contains("reduce") ->
+                    com.example.assistant.hardware.AndroidHardwareController.adjustBrightness(context, directionUp = false)
+                queryLower.contains("badhao") || queryLower.contains("up") || queryLower.contains("high") || queryLower.contains("full") ->
+                    com.example.assistant.hardware.AndroidHardwareController.adjustBrightness(
+                        context,
+                        directionUp = if (queryLower.contains("full")) null else true,
+                        targetPercent = if (queryLower.contains("full")) 100 else null
+                    )
+                else -> com.example.assistant.hardware.AndroidHardwareController.adjustBrightness(context, directionUp = true)
+            }
+            val msg = when (res) { is com.example.assistant.hardware.HardwareActionResult.Success -> res.message; is com.example.assistant.hardware.HardwareActionResult.Failure -> res.message }
+            saveHistory(userQuery, msg, "HARDWARE")
+            return@withContext AriaCommandResult.TextResponse(msg, "HARDWARE")
         } else if (queryLower.contains("battery percentage") || queryLower.contains("battery kitni hai") || queryLower.contains("battery status")) {
             val msg = com.example.assistant.hardware.AndroidHardwareController.getBatteryTelemetry(context)
             saveHistory(userQuery, msg, "HARDWARE")
             return@withContext AriaCommandResult.TextResponse(msg, "HARDWARE")
         } else if (queryLower.contains("wifi") || queryLower.contains("wi-fi")) {
-            val res = com.example.assistant.hardware.AndroidHardwareController.openWifiControl(context)
+            val enableTarget = when {
+                queryLower.contains(" on") || queryLower.contains("chalu") || queryLower.contains("enable") -> true
+                queryLower.contains(" off") || queryLower.contains("band") || queryLower.contains("disable") -> false
+                else -> null
+            }
+            val res = com.example.assistant.hardware.AndroidHardwareController.openWifiControl(context, enableTarget)
             val msg = when (res) { is com.example.assistant.hardware.HardwareActionResult.Success -> res.message; is com.example.assistant.hardware.HardwareActionResult.Failure -> res.message }
             saveHistory(userQuery, msg, "HARDWARE")
             return@withContext AriaCommandResult.TextResponse(msg, "HARDWARE")
         } else if (queryLower.contains("bluetooth")) {
-            val res = com.example.assistant.hardware.AndroidHardwareController.openBluetoothControl(context)
+            val enableTarget = when {
+                queryLower.contains(" on") || queryLower.contains("chalu") || queryLower.contains("enable") -> true
+                queryLower.contains(" off") || queryLower.contains("band") || queryLower.contains("disable") -> false
+                else -> null
+            }
+            val res = com.example.assistant.hardware.AndroidHardwareController.openBluetoothControl(context, enableTarget)
             val msg = when (res) { is com.example.assistant.hardware.HardwareActionResult.Success -> res.message; is com.example.assistant.hardware.HardwareActionResult.Failure -> res.message }
             saveHistory(userQuery, msg, "HARDWARE")
             return@withContext AriaCommandResult.TextResponse(msg, "HARDWARE")
         }
 
-        // 0.415 WhatsApp Notification Reader
+        // 0.415 WhatsApp Voice Note Recording / Sending & Unread Notification Reader
+        if (queryLower.contains("voice note") || queryLower.contains("audio message") || queryLower.contains("voice message")) {
+            val contactHint = extractVoiceNoteRecipient(userQuery)
+            val isRecordingNow = com.example.assistant.whatsapp.WhatsAppAutomationManager.isRecordingActive()
+
+            if (isRecordingNow && (queryLower.contains("stop") || queryLower.contains("send") || queryLower.contains("bhej") || contactHint.isNotBlank())) {
+                val targetName = contactHint.ifBlank { pendingVoiceNoteRecipient.ifBlank { "WhatsApp" } }
+                pendingVoiceNoteRecipient = ""
+                val vnResult = com.example.assistant.whatsapp.WhatsAppAutomationManager.stopAndSendVoiceNote(context, targetName)
+                val reply = when (vnResult) {
+                    is WhatsAppActionResult.Success -> vnResult.message
+                    is WhatsAppActionResult.GeneralFailure -> vnResult.message
+                    else -> "Voice note WhatsApp par share kiya gaya."
+                }
+                saveHistory(userQuery, reply, "WHATSAPP")
+                return@withContext AriaCommandResult.TextResponse(reply, "WHATSAPP")
+            } else if (!isRecordingNow) {
+                if (contactHint.isNotBlank()) pendingVoiceNoteRecipient = contactHint
+                val started = com.example.assistant.whatsapp.WhatsAppAutomationManager.startVoiceNoteRecording(context)
+                val reply = if (started) {
+                    if (pendingVoiceNoteRecipient.isNotBlank()) {
+                        "Voice note recording chalu ho gayi hai ($pendingVoiceNoteRecipient ke liye) 🎙️. Boliye aur khatam hone par 'send voice note' kahiye!"
+                    } else {
+                        "Voice note recording chalu ho gayi hai 🎙️. Boliye aur bhejne ke liye 'send voice note to <name>' kahiye!"
+                    }
+                } else {
+                    "Microphone se voice note record nahi ho saka — Record Audio permission check kijiye."
+                }
+                saveHistory(userQuery, reply, "WHATSAPP")
+                return@withContext AriaCommandResult.TextResponse(reply, "WHATSAPP")
+            }
+        }
+
         if (queryLower.contains("whatsapp messages padho") || queryLower.contains("read whatsapp") || queryLower.contains("messages sunao")) {
             if (!com.example.assistant.whatsapp.WhatsAppAutomationManager.isNotificationAccessGranted(context)) {
                 com.example.assistant.whatsapp.WhatsAppAutomationManager.openNotificationAccessSettings(context)
@@ -115,24 +187,49 @@ class AriaCommandProcessor(
             return@withContext AriaCommandResult.TextResponse(summary, "WHATSAPP")
         }
 
-        // 0.416 Screen Vision: Read Screen Content Aloud & Auto-Tap
-        if (queryLower.contains("read screen") || queryLower.contains("screen padho") || queryLower.contains("screen pe kya likha hai")) {
-            var screenResult = "Screen read nahi ho saki."
-            com.example.assistant.accessibility.AriaAccessibilityGestureService.readScreenContent { text ->
-                screenResult = text
+        // 0.416 Screen Vision: Read Screen Content (Accessibility + ML Kit OCR), On-Device Translate, & Auto-Tap
+        if (queryLower.contains("translate screen") || queryLower.contains("screen translate") || queryLower.contains("screen anuvaad")) {
+            val isEnabled = com.example.assistant.accessibility.AriaAccessibilityGestureService.checkAccessibilityEnabled(context) ||
+                com.example.assistant.accessibility.AriaAccessibilityGestureService.isServiceRunning()
+            if (!isEnabled) {
+                com.example.assistant.accessibility.AriaAccessibilityGestureService.openAccessibilitySettings(context)
+                val errMsg = "Screen translate karne ke liye Accessibility Service ON kijiye. Maine Accessibility settings khol di hai."
+                saveHistory(userQuery, errMsg, "SCREEN_VISION")
+                return@withContext AriaCommandResult.TextResponse(errMsg, "SCREEN_VISION")
             }
+            val targetLang = detectMlKitTargetLanguage(queryLower)
+            val translated = com.example.assistant.accessibility.AriaAccessibilityGestureService.translateScreenContentSuspend(targetLang)
+            saveHistory(userQuery, translated, "SCREEN_VISION")
+            return@withContext AriaCommandResult.TextResponse(translated, "SCREEN_VISION")
+        } else if (queryLower.contains("read screen") || queryLower.contains("screen padho") || queryLower.contains("screen pe kya likha hai") || queryLower.contains("ocr")) {
+            val isEnabled = com.example.assistant.accessibility.AriaAccessibilityGestureService.checkAccessibilityEnabled(context) ||
+                com.example.assistant.accessibility.AriaAccessibilityGestureService.isServiceRunning()
+            if (!isEnabled) {
+                com.example.assistant.accessibility.AriaAccessibilityGestureService.openAccessibilitySettings(context)
+                val errMsg = "Screen padhne ke liye ARC Accessibility Service ON kijiye. Maine Accessibility settings khol di hai."
+                saveHistory(userQuery, errMsg, "SCREEN_VISION")
+                return@withContext AriaCommandResult.TextResponse(errMsg, "SCREEN_VISION")
+            }
+            val forceOcr = queryLower.contains("ocr") || queryLower.contains("image") || queryLower.contains("photo")
+            val screenResult = com.example.assistant.accessibility.AriaAccessibilityGestureService.readScreenContentSuspend(forceOcr)
             saveHistory(userQuery, screenResult, "SCREEN_VISION")
             return@withContext AriaCommandResult.TextResponse(screenResult, "SCREEN_VISION")
         } else if (queryLower.contains("button dabao") || queryLower.contains("tap button") || queryLower.contains("click ")) {
+            val isEnabled = com.example.assistant.accessibility.AriaAccessibilityGestureService.checkAccessibilityEnabled(context) ||
+                com.example.assistant.accessibility.AriaAccessibilityGestureService.isServiceRunning()
+            if (!isEnabled) {
+                com.example.assistant.accessibility.AriaAccessibilityGestureService.openAccessibilitySettings(context)
+                val errMsg = "Auto-tap ke liye ARC Accessibility Service ON kijiye. Maine Accessibility settings khol di hai."
+                saveHistory(userQuery, errMsg, "SCREEN_VISION")
+                return@withContext AriaCommandResult.TextResponse(errMsg, "SCREEN_VISION")
+            }
             val targetBtn = userQuery.replace("button dabao", "", ignoreCase = true)
                 .replace("tap button", "", ignoreCase = true)
                 .replace("click", "", ignoreCase = true).trim()
-            var tapMsg = "Button search kiya ja raha hai..."
-            com.example.assistant.accessibility.AriaAccessibilityGestureService.autoTapButtonByName(targetBtn) { res ->
-                tapMsg = when (res) {
-                    is com.example.assistant.accessibility.GestureResult.Success -> res.message
-                    is com.example.assistant.accessibility.GestureResult.Failure -> res.message
-                }
+            val tapRes = com.example.assistant.accessibility.AriaAccessibilityGestureService.autoTapButtonByNameSuspend(targetBtn)
+            val tapMsg = when (tapRes) {
+                is com.example.assistant.accessibility.GestureResult.Success -> tapRes.message
+                is com.example.assistant.accessibility.GestureResult.Failure -> tapRes.message
             }
             saveHistory(userQuery, tapMsg, "SCREEN_VISION")
             return@withContext AriaCommandResult.TextResponse(tapMsg, "SCREEN_VISION")
@@ -435,11 +532,11 @@ class AriaCommandProcessor(
         // 2. ARIA Internal Tools (Notepad & Calculator)
         if (queryLower.contains("open notepad") || queryLower.contains("calculator") || queryLower.contains("kholo calculator") || queryLower.contains("notes")) {
             if (queryLower.contains("calculator") || queryLower.contains("calc")) {
-                val reply = "Calculator open kar rahi hu."
+                val reply = "Calculator open kar raha hu."
                 saveHistory(userQuery, reply, "APP")
                 return@withContext AriaCommandResult.LaunchApp(reply, "CALCULATOR")
             } else if (queryLower.contains("notepad") || queryLower.contains("notes")) {
-                val reply = "ARC Notepad open kar rahi hu."
+                val reply = "ARC Notepad open kar raha hu."
                 saveHistory(userQuery, reply, "APP")
                 return@withContext AriaCommandResult.LaunchApp(reply, "NOTEPAD")
             }
@@ -752,5 +849,41 @@ class AriaCommandProcessor(
 
         saveHistory("ARC Auto Briefing", briefingText, "BRIEFING")
         briefingText
+    }
+
+    private var pendingVoiceNoteRecipient: String = ""
+
+    private fun extractVoiceNoteRecipient(query: String): String {
+        val cleaned = query
+            .replace("record", "", ignoreCase = true)
+            .replace("start", "", ignoreCase = true)
+            .replace("stop", "", ignoreCase = true)
+            .replace("send", "", ignoreCase = true)
+            .replace("whatsapp", "", ignoreCase = true)
+            .replace("voice note", "", ignoreCase = true)
+            .replace("audio message", "", ignoreCase = true)
+            .replace("voice message", "", ignoreCase = true)
+            .replace("bhejo", "", ignoreCase = true)
+            .replace("karo", "", ignoreCase = true)
+            .replace("for", "", ignoreCase = true)
+            .replace("to", "", ignoreCase = true)
+            .replace("ko", "", ignoreCase = true)
+            .replace("ka", "", ignoreCase = true)
+            .trim()
+        return if (cleaned.length >= 2) cleaned else ""
+    }
+
+    private fun detectMlKitTargetLanguage(queryLower: String): String {
+        return when {
+            queryLower.contains("english") || queryLower.contains("angrezi") -> TranslateLanguage.ENGLISH
+            queryLower.contains("marathi") -> TranslateLanguage.MARATHI
+            queryLower.contains("gujarati") -> TranslateLanguage.GUJARATI
+            queryLower.contains("bengali") || queryLower.contains("bangla") -> TranslateLanguage.BENGALI
+            queryLower.contains("tamil") -> TranslateLanguage.TAMIL
+            queryLower.contains("telugu") -> TranslateLanguage.TELUGU
+            queryLower.contains("kannada") -> TranslateLanguage.KANNADA
+            queryLower.contains("urdu") -> TranslateLanguage.URDU
+            else -> TranslateLanguage.HINDI
+        }
     }
 }

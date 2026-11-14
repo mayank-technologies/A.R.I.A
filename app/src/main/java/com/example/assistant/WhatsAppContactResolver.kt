@@ -70,7 +70,7 @@ object WhatsAppContactResolver {
         if (contactName.isBlank()) {
             // No specific contact name detected, open default WhatsApp
             SmartAppOpener.smartLaunchApp(context, "whatsapp")
-            return WhatsAppActionResult.Success("WhatsApp app khol rahi hu, Boss!")
+            return WhatsAppActionResult.Success("WhatsApp app khol raha hu, Boss!")
         }
 
         Log.d(TAG, "==========================================================")
