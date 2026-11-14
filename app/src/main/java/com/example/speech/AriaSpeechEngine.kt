@@ -54,20 +54,37 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     // Adam:   "pNInz6obpgDQGcFmaJgB" (Deep, Natural, Warm Male Voice)
     // Antoni: "ErXwobaYiN019PkySvjV" (Warm Well-Rounded Male Voice)
     // Josh:   "TxGEqnHWrfWFTfGW9XjX" (Deep Narrative Male Voice)
+    private fun isPlaceholderValue(value: String): Boolean {
+        val v = value.trim()
+        return v.isBlank() ||
+            v.equals("your_key_here", ignoreCase = true) ||
+            v.equals("your_voice_id_here", ignoreCase = true) ||
+            v.equals("MY_GEMINI_API_KEY", ignoreCase = true) ||
+            v.startsWith("YOUR_", ignoreCase = true)
+    }
+
     private var voiceId = try {
         val prefs = context.getSharedPreferences("aria_prefs", Context.MODE_PRIVATE)
         val savedVoiceId = prefs.getString("elevenlabs_voice_id", "") ?: ""
+        val buildConfigVoiceId = try {
+            BuildConfig::class.java.getField("ELEVENLABS_VOICE_ID").get(null) as? String ?: ""
+        } catch (_: Exception) { "" }
         val legacyFemaleIds = setOf("21m00Tcm4TlvDq8ikWAM", "EXAVITQu4vr4xnSDxMaL")
-        if (savedVoiceId.isBlank() || savedVoiceId in legacyFemaleIds) {
-            prefs.edit().putString("elevenlabs_voice_id", "pNInz6obpgDQGcFmaJgB").apply()
-            "pNInz6obpgDQGcFmaJgB"
-        } else {
-            savedVoiceId
+        when {
+            !isPlaceholderValue(buildConfigVoiceId) && buildConfigVoiceId !in legacyFemaleIds -> buildConfigVoiceId.trim()
+            !isPlaceholderValue(savedVoiceId) && savedVoiceId !in legacyFemaleIds -> savedVoiceId.trim()
+            else -> {
+                prefs.edit().putString("elevenlabs_voice_id", "pNInz6obpgDQGcFmaJgB").apply()
+                "pNInz6obpgDQGcFmaJgB"
+            }
         }
     } catch (e: Exception) {
         "pNInz6obpgDQGcFmaJgB"
     }
-    private var apiKey = try { BuildConfig::class.java.getField("ELEVENLABS_API_KEY").get(null) as? String ?: "" } catch (e: Exception) { "" }
+    private var apiKey = try {
+        val raw = BuildConfig::class.java.getField("ELEVENLABS_API_KEY").get(null) as? String ?: ""
+        if (isPlaceholderValue(raw)) "" else raw.trim()
+    } catch (e: Exception) { "" }
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -117,9 +134,9 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                 nativeTts?.setLanguage(Locale.US)
             }
             nativeTts?.setSpeechRate(_speechRate.value)
-            nativeTts?.setPitch(0.90f)
 
             // Select Permanent Male Voice if available on device
+            var selectedMaleVoice = false
             try {
                 val availableVoices = nativeTts?.voices
                 if (availableVoices != null) {
@@ -139,14 +156,17 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                     }
                     if (maleVoice != null) {
                         nativeTts?.voice = maleVoice
+                        selectedMaleVoice = true
                         Log.d("AriaSpeechEngine", "Selected permanent male voice: ${maleVoice.name}")
                     } else {
-                        Log.d("AriaSpeechEngine", "No explicit male TTS voice tag found; using deeper pitch (0.90f)")
+                        Log.d("AriaSpeechEngine", "No explicit male TTS voice tag found; shifting pitch to 0.78f")
                     }
                 }
             } catch (e: Exception) {
                 Log.e("AriaSpeechEngine", "Could not set custom male voice: ${e.message}")
             }
+            // If emulator/device only ships a female/neutral default voice, 0.78f drops it cleanly into male baritone register
+            nativeTts?.setPitch(if (selectedMaleVoice) 0.92f else 0.78f)
 
             nativeTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
@@ -218,9 +238,10 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     }
 
     private fun getApiKey(): String {
-        if (apiKey.isNotBlank()) return apiKey
+        if (!isPlaceholderValue(apiKey)) return apiKey
         val prefs = context.getSharedPreferences("aria_prefs", Context.MODE_PRIVATE)
-        return prefs.getString("elevenlabs_api_key", "") ?: ""
+        val saved = prefs.getString("elevenlabs_api_key", "") ?: ""
+        return if (isPlaceholderValue(saved)) "" else saved.trim()
     }
 
     fun setApiKey(key: String) {

@@ -96,13 +96,18 @@ class GeminiLiveVoiceManager(private val context: Context) {
     private val pendingSpeechTurns = mutableListOf<String>()
     private var onFallbackSpeechNeeded: ((String) -> Unit)? = null
 
+    private var setupWatchdogJob: Job? = null
+
     fun setOnFallbackSpeechListener(listener: (String) -> Unit) {
         onFallbackSpeechNeeded = listener
     }
 
     fun hasValidApiKey(): Boolean {
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        return apiKey.isNotBlank() && apiKey != "MY_GEMINI_API_KEY"
+        val apiKey = BuildConfig.GEMINI_API_KEY.trim()
+        return apiKey.isNotBlank() &&
+            !apiKey.equals("MY_GEMINI_API_KEY", ignoreCase = true) &&
+            !apiKey.equals("your_key_here", ignoreCase = true) &&
+            !apiKey.startsWith("YOUR_", ignoreCase = true)
     }
 
     private val _sessionState = MutableStateFlow(GeminiLiveSessionState.DISCONNECTED)
@@ -117,10 +122,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
     private val _micVolumeLevel = MutableStateFlow(0f)
     val micVolumeLevel: StateFlow<Float> = _micVolumeLevel.asStateFlow()
 
+    // NOTE: Do NOT configure OkHttp pingInterval() for Gemini BidiGenerateContent WebSocket.
+    // Google's Bidi gateway does not echo low-level WebSocket PING control frames within OkHttp's window,
+    // which causes deterministic SocketTimeoutException ("sent ping but didn't receive pong within 10000ms").
     private val okHttpClient = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS) // Indefinite for real-time WebSocket
+        .readTimeout(0, TimeUnit.MILLISECONDS) // Indefinite for streaming WebSocket
+        .writeTimeout(15, TimeUnit.SECONDS)
         .connectTimeout(15, TimeUnit.SECONDS)
-        .pingInterval(10, TimeUnit.SECONDS)
         .build()
 
     /**
@@ -154,27 +162,37 @@ class GeminiLiveVoiceManager(private val context: Context) {
     }
 
     private fun openWebSocketConnection() {
-        val apiKey = BuildConfig.GEMINI_API_KEY
+        val apiKey = BuildConfig.GEMINI_API_KEY.trim()
         val url = "wss://$HOST$PATH?key=$apiKey"
         val request = Request.Builder().url(url).build()
         isSetupComplete = false
 
-        webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+        // Clean up any previous socket/jobs before opening a fresh socket
+        recordJob?.cancel()
+        recordJob = null
+        setupWatchdogJob?.cancel()
+        webSocket?.cancel()
+
+        val socket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
                 Log.d(TAG, "Gemini Live WebSocket Opened (fallback=$usingFallbackModel)")
                 _sessionState.value = GeminiLiveSessionState.CONNECTED
                 sendInitialHandshakeSetup(webSocket, useFallbackModel = usingFallbackModel)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
                 handleIncomingGeminiMessage(webSocket, text)
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
                 playRawPcm(bytes.toByteArray())
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
                 Log.e(TAG, "Gemini Live WebSocket Error: ${t.message}", t)
                 if (!isSetupComplete && !usingFallbackModel) {
                     Log.w(TAG, "Retrying Gemini Live with fallback model $FALLBACK_LIVE_MODEL")
@@ -189,6 +207,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
                 Log.d(TAG, "Gemini Live WebSocket closed ($code: $reason)")
                 if (!isSetupComplete && !usingFallbackModel && code != 1000) {
                     Log.w(TAG, "Setup closed early ($code: $reason). Retrying with fallback model $FALLBACK_LIVE_MODEL")
@@ -201,6 +220,15 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 drainPendingToFallback()
             }
         })
+        webSocket = socket
+
+        // Watchdog: if queued speech is waiting on setupComplete for >4.5s, speak via male fallback TTS
+        setupWatchdogJob = scope.launch {
+            kotlinx.coroutines.delay(4500L)
+            if (!isSetupComplete) {
+                drainPendingToFallback()
+            }
+        }
     }
 
     /**
@@ -534,12 +562,24 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 minBufSize.coerceAtLeast(4096)
             )
 
+            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                Log.w(TAG, "AudioRecord not initialized; keeping Gemini Live output stream active.")
+                audioRecord?.release()
+                audioRecord = null
+                _sessionState.value = GeminiLiveSessionState.CONNECTED
+                return
+            }
+
             audioRecord?.startRecording()
             _sessionState.value = GeminiLiveSessionState.LISTENING
 
             recordJob = scope.launch {
                 val buffer = ByteArray(2048)
-                while (isActive && _sessionState.value != GeminiLiveSessionState.DISCONNECTED) {
+                while (isActive &&
+                    this@GeminiLiveVoiceManager.webSocket === ws &&
+                    _sessionState.value != GeminiLiveSessionState.DISCONNECTED &&
+                    _sessionState.value != GeminiLiveSessionState.ERROR
+                ) {
                     val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                     if (read > 0) {
                         if (_sessionState.value == GeminiLiveSessionState.LISTENING) {
@@ -580,10 +620,11 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 }
             }
         } catch (e: SecurityException) {
-            Log.e(TAG, "RECORD_AUDIO permission missing for Live Voice: ${e.message}")
-            _sessionState.value = GeminiLiveSessionState.ERROR
+            Log.w(TAG, "RECORD_AUDIO permission not granted yet; keeping Gemini Live speaker stream active.")
+            _sessionState.value = GeminiLiveSessionState.CONNECTED
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start AudioRecord: ${e.message}", e)
+            Log.w(TAG, "AudioRecord unavailable (${e.message}); keeping Gemini Live speaker stream active.")
+            _sessionState.value = GeminiLiveSessionState.CONNECTED
         }
     }
 
@@ -659,13 +700,16 @@ class GeminiLiveVoiceManager(private val context: Context) {
      */
     fun stopLiveSession() {
         try {
+            setupWatchdogJob?.cancel()
+            setupWatchdogJob = null
             isSetupComplete = false
             synchronized(pendingSpeechTurns) {
                 pendingSpeechTurns.clear()
             }
             releaseAudioHardware()
-            webSocket?.close(1000, "User stopped session")
+            val ws = webSocket
             webSocket = null
+            ws?.close(1000, "User stopped session")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping Live Session: ${e.message}")
         } finally {

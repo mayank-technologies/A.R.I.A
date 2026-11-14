@@ -63,8 +63,8 @@ object GeminiClient {
     }
 
     suspend fun queryAriaAi(prompt: String): String {
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+        val apiKey = BuildConfig.GEMINI_API_KEY.trim()
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY" || apiKey == "your_key_here") {
             return "ARC AI mode active: I can help answer questions, calculate math, check weather, set reminders, and explain Python code!"
         }
         val clockInfo = DeviceClockHelper.getCurrentDeviceClockInfo(logDebug = false, source = "GeminiTextAI")
