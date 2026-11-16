@@ -117,6 +117,7 @@ fun ParticleAvatar3D(
     status: AssistantStatus,
     modifier: Modifier = Modifier,
     micVolume: Float = 0f,
+    speechVolume: Float = 0f,
     disableAnimations: Boolean = false
 ) {
     val corePoints = remember { CoreAvatarGenerator.generateCorePoints() }
@@ -185,11 +186,17 @@ fun ParticleAvatar3D(
     )
 
     val isListening = status == AssistantStatus.LISTENING
-    val targetMicVolume = if (isListening && !disableAnimations) micVolume.coerceIn(0f, 1f) else 0f
+    val isSpeaking = status == AssistantStatus.SPEAKING
+    val targetAudioEnergy = when {
+        disableAnimations -> 0f
+        isListening -> micVolume.coerceIn(0f, 1f)
+        isSpeaking -> speechVolume.coerceIn(0f, 1f)
+        else -> 0f
+    }
     val smoothedMicVolume by animateFloatAsState(
-        targetValue = targetMicVolume,
-        animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing),
-        label = "mic_volume_smooth"
+        targetValue = targetAudioEnergy,
+        animationSpec = tween(durationMillis = 75, easing = FastOutSlowInEasing),
+        label = "audio_energy_smooth"
     )
 
     // Fixed blue/cyan palette: state ONLY changes animation speed & glow intensity, never color.
@@ -215,7 +222,7 @@ fun ParticleAvatar3D(
             val pulse = if (!disableAnimations) audioPulse else 1f
 
             val statusAlphaBoost = when (status) {
-                AssistantStatus.SPEAKING -> 1.15f
+                AssistantStatus.SPEAKING -> 1.12f + smoothedMicVolume * 0.65f
                 AssistantStatus.LISTENING -> 1.05f + smoothedMicVolume * 0.72f
                 AssistantStatus.PROCESSING -> 1.05f
                 AssistantStatus.SLEEP -> 0.42f
@@ -227,7 +234,7 @@ fun ParticleAvatar3D(
             // -----------------------------------------------------------------
             val outerBloomFactor = when (status) {
                 AssistantStatus.LISTENING -> 0.93f + (pulse - 0.92f) * 0.12f + smoothedMicVolume * 0.13f
-                AssistantStatus.SPEAKING -> 0.96f + (pulse - 0.92f) * 0.16f
+                AssistantStatus.SPEAKING -> 0.95f + (pulse - 0.92f) * 0.16f + smoothedMicVolume * 0.14f
                 else -> 1f
             }
             val outerBloomRadius = (minDim * 0.495f) * outerBloomFactor
@@ -261,7 +268,7 @@ fun ParticleAvatar3D(
 
             // Subtle energy ripple ring only when actively speaking or listening
             if (status == AssistantStatus.SPEAKING || isListening) {
-                val rippleAlpha = if (isListening) {
+                val rippleAlpha = if (isListening || status == AssistantStatus.SPEAKING) {
                     (0.18f + smoothedMicVolume * 0.56f + (pulse - 0.92f) * 0.18f).coerceIn(0.10f, 0.78f)
                 } else {
                     (0.28f * (pulse - 0.72f)).coerceIn(0.06f, 0.36f)

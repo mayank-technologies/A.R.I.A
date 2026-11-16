@@ -108,6 +108,27 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         maxOf(speechVol, liveVol)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
+    val speechOutputLevel: StateFlow<Float> = combine(
+        speechEngine.outputAudioLevel,
+        geminiLiveManager.outputAudioLevel
+    ) { ttsLevel, liveLevel ->
+        maxOf(ttsLevel, liveLevel)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
+    val speechOutputBands: StateFlow<List<Float>> = combine(
+        speechEngine.outputAudioBands,
+        geminiLiveManager.outputAudioBands
+    ) { ttsBands, liveBands ->
+        val size = maxOf(ttsBands.size, liveBands.size)
+        List(size) { idx ->
+            maxOf(ttsBands.getOrElse(idx) { 0f }, liveBands.getOrElse(idx) { 0f })
+        }
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        com.example.speech.SpeechWaveformAnalyzer.SILENT_BANDS
+    )
+
     val activeVoiceDebugInfo: StateFlow<String> = combine(
         geminiLiveManager.activeVoiceDebugInfo,
         speechEngine.activeVoiceDebugInfo,

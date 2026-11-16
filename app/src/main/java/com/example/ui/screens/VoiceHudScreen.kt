@@ -132,6 +132,7 @@ import com.example.ui.AssistantStatus
 import com.example.ui.components.ListeningPulseIndicator
 import com.example.ui.components.ArcBrandLogo
 import com.example.ui.components.ParticleAvatar3D
+import com.example.ui.components.SpeechAudioVisualizer
 import com.example.ui.theme.CarbonBlack
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.DeepSpace
@@ -276,6 +277,8 @@ fun VoiceHudScreen(
     val isGeminiLiveMode by viewModel.isGeminiLiveMode.collectAsState()
     val geminiLiveState by viewModel.geminiLiveManager.sessionState.collectAsState()
     val micVolumeLevel by viewModel.micVolumeLevel.collectAsState()
+    val speechOutputLevel by viewModel.speechOutputLevel.collectAsState()
+    val speechOutputBands by viewModel.speechOutputBands.collectAsState()
     val activeVoiceDebugInfo by viewModel.activeVoiceDebugInfo.collectAsState()
 
     val isBatterySaverActive by AriaBatterySaverManager.isBatterySaverActive.collectAsState()
@@ -526,6 +529,7 @@ fun VoiceHudScreen(
                         ParticleAvatar3D(
                             status = if (isActivelyListening && isArcPoweredOn) AssistantStatus.LISTENING else effectiveStatus,
                             micVolume = micVolumeLevel,
+                            speechVolume = speechOutputLevel,
                             disableAnimations = isBatterySaverActive || !isArcPoweredOn,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -602,6 +606,21 @@ fun VoiceHudScreen(
                         disableAnimations = isBatterySaverActive,
                         modifier = Modifier.padding(top = 6.dp)
                     )
+
+                    // Real-time Canvas Speech Output Audio Visualizer (synced with Gemini Live PCM / TTS)
+                    AnimatedVisibility(
+                        visible = isArcPoweredOn && (effectiveStatus == AssistantStatus.SPEAKING || isSpeaking || speechOutputLevel > 0.02f),
+                        enter = fadeIn(tween(160)),
+                        exit = fadeOut(tween(220))
+                    ) {
+                        SpeechAudioVisualizer(
+                            isSpeaking = effectiveStatus == AssistantStatus.SPEAKING || isSpeaking || speechOutputLevel > 0.02f,
+                            audioLevel = speechOutputLevel,
+                            audioBands = speechOutputBands,
+                            disableAnimations = isBatterySaverActive,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
 
                     // Live Partial Speech Caption Pill so user sees microphone hearing words in real time
                     AnimatedVisibility(

@@ -8,6 +8,7 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.ToneGenerator
+import android.media.audiofx.Visualizer
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -23,9 +24,11 @@ import com.example.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -129,6 +132,20 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     private val _micVolumeLevel = MutableStateFlow(0f)
     val micVolumeLevel: StateFlow<Float> = _micVolumeLevel.asStateFlow()
 
+    private val outputWaveformAnalyzer = SpeechWaveformAnalyzer()
+
+    private val _outputAudioLevel = MutableStateFlow(0f)
+    val outputAudioLevel: StateFlow<Float> = _outputAudioLevel.asStateFlow()
+
+    private val _outputAudioBands = MutableStateFlow(SpeechWaveformAnalyzer.SILENT_BANDS)
+    val outputAudioBands: StateFlow<List<Float>> = _outputAudioBands.asStateFlow()
+
+    private var speechCadenceJob: Job? = null
+    private var mediaPlayerVisualizer: Visualizer? = null
+
+    @Volatile
+    private var ttsSyllableEnergy = 0.72f
+
     private val _isWakeWordModeEnabled = MutableStateFlow(false)
     val isWakeWordModeEnabled: StateFlow<Boolean> = _isWakeWordModeEnabled.asStateFlow()
 
@@ -187,10 +204,19 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
             nativeTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     _isSpeaking.value = true
+                    ttsSyllableEnergy = 0.85f
+                    startSpeechCadenceLoop()
+                }
+
+                override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
+                    // Boost waveform syllable pulse on every spoken word boundary
+                    val wordSpan = (end - start).coerceIn(1, 16)
+                    ttsSyllableEnergy = (0.55f + (wordSpan / 16f) * 0.45f).coerceIn(0.55f, 1.0f)
                 }
 
                 override fun onDone(utteranceId: String?) {
                     _isSpeaking.value = false
+                    stopOutputTelemetry()
                     if (_isWakeWordModeEnabled.value) {
                         scheduleWakeWordLoop(1000L)
                     }
@@ -199,6 +225,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
                     _isSpeaking.value = false
+                    stopOutputTelemetry()
                     if (_isWakeWordModeEnabled.value) {
                         scheduleWakeWordLoop(1000L)
                     }
@@ -424,12 +451,14 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                             .build()
                     )
                     setDataSource(file.absolutePath)
-                    setOnPreparedListener {
+                    setOnPreparedListener { player ->
                         _isSpeaking.value = true
                         start()
+                        attachMediaPlayerVisualizerOrCadence(player)
                     }
                     setOnCompletionListener {
                         _isSpeaking.value = false
+                        stopOutputTelemetry()
                         release()
                         mediaPlayer = null
                         if (_isWakeWordModeEnabled.value) {
@@ -438,6 +467,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                     }
                     setOnErrorListener { _, _, _ ->
                         _isSpeaking.value = false
+                        stopOutputTelemetry()
                         release()
                         mediaPlayer = null
                         true
@@ -446,9 +476,94 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                 }
             } catch (e: Exception) {
                 _isSpeaking.value = false
+                stopOutputTelemetry()
                 Log.e("AriaSpeechEngine", "Error playing MP3 file: ${e.message}")
             }
         }
+    }
+
+    private fun attachMediaPlayerVisualizerOrCadence(player: MediaPlayer) {
+        releaseVisualizer()
+        var attached = false
+        try {
+            val sessionId = player.audioSessionId
+            if (sessionId != AudioManager.ERROR) {
+                val vis = Visualizer(sessionId).apply {
+                    captureSize = Visualizer.getCaptureSizeRange()[0].coerceAtLeast(128)
+                    setDataCaptureListener(
+                        object : Visualizer.OnDataCaptureListener {
+                            override fun onWaveFormDataCapture(
+                                visualizer: Visualizer?,
+                                waveform: ByteArray?,
+                                samplingRate: Int
+                            ) {
+                                if (waveform != null && _isSpeaking.value) {
+                                    val frame = outputWaveformAnalyzer.analyzeVisualizerWaveform(waveform)
+                                    _outputAudioLevel.value = frame.level
+                                    _outputAudioBands.value = frame.bands
+                                }
+                            }
+
+                            override fun onFftDataCapture(
+                                visualizer: Visualizer?,
+                                fft: ByteArray?,
+                                samplingRate: Int
+                            ) = Unit
+                        },
+                        Visualizer.getMaxCaptureRate() / 2,
+                        true,
+                        false
+                    )
+                    enabled = true
+                }
+                mediaPlayerVisualizer = vis
+                attached = true
+            }
+        } catch (_: Throwable) {
+            releaseVisualizer()
+        }
+        if (!attached) {
+            ttsSyllableEnergy = 0.82f
+            startSpeechCadenceLoop()
+        }
+    }
+
+    private fun startSpeechCadenceLoop() {
+        speechCadenceJob?.cancel()
+        speechCadenceJob = engineScope.launch {
+            var phase = 0f
+            while (isActive && _isSpeaking.value) {
+                val frame = outputWaveformAnalyzer.synthesizeSpeechCadenceFrame(
+                    phaseRad = phase,
+                    syllableBoost = ttsSyllableEnergy
+                )
+                _outputAudioLevel.value = frame.level
+                _outputAudioBands.value = frame.bands
+                // Gently relax syllable boost between TTS word range triggers
+                ttsSyllableEnergy = (ttsSyllableEnergy * 0.90f).coerceAtLeast(0.42f)
+                phase += 0.45f
+                delay(45L)
+            }
+            stopOutputTelemetry()
+        }
+    }
+
+    private fun releaseVisualizer() {
+        try {
+            mediaPlayerVisualizer?.enabled = false
+            mediaPlayerVisualizer?.release()
+        } catch (_: Throwable) {
+        }
+        mediaPlayerVisualizer = null
+    }
+
+    private fun stopOutputTelemetry() {
+        speechCadenceJob?.cancel()
+        speechCadenceJob = null
+        releaseVisualizer()
+        val reset = outputWaveformAnalyzer.reset()
+        _outputAudioLevel.value = reset.level
+        _outputAudioBands.value = reset.bands
     }
 
     private fun speakNative(text: String, reason: String = "Direct Native TTS") {
@@ -472,6 +587,8 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
         val params = Bundle()
         params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
         _isSpeaking.value = true
+        ttsSyllableEnergy = 0.82f
+        startSpeechCadenceLoop()
         nativeTts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
 
@@ -515,6 +632,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
         nativeTts?.stop()
         _isSpeaking.value = false
         _isSynthesizing.value = false
+        stopOutputTelemetry()
     }
 
     fun hasAudioPermission(): Boolean {
@@ -942,6 +1060,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     fun destroy() {
         wakeWordJob?.cancel()
         stopSpeaking()
+        stopOutputTelemetry()
         _micVolumeLevel.value = 0f
         _partialTranscript.value = ""
         _wakeWordState.value = WakeWordState.OFF

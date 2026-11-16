@@ -11,6 +11,7 @@ import android.util.Log
 import com.example.BuildConfig
 import com.example.assistant.DeviceClockHelper
 import com.example.claude.ClaudeReasoningEngine
+import com.example.speech.SpeechWaveformAnalyzer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -184,6 +185,14 @@ class GeminiLiveVoiceManager(private val context: Context) {
     private val _micVolumeLevel = MutableStateFlow(0f)
     val micVolumeLevel: StateFlow<Float> = _micVolumeLevel.asStateFlow()
 
+    private val outputWaveformAnalyzer = SpeechWaveformAnalyzer()
+
+    private val _outputAudioLevel = MutableStateFlow(0f)
+    val outputAudioLevel: StateFlow<Float> = _outputAudioLevel.asStateFlow()
+
+    private val _outputAudioBands = MutableStateFlow(SpeechWaveformAnalyzer.SILENT_BANDS)
+    val outputAudioBands: StateFlow<List<Float>> = _outputAudioBands.asStateFlow()
+
     private val _isAffectiveDialogActive = MutableStateFlow(false)
     val isAffectiveDialogActive: StateFlow<Boolean> = _isAffectiveDialogActive.asStateFlow()
 
@@ -314,6 +323,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 _activeVoiceDebugInfo.value = info
                 _sessionState.value = GeminiLiveSessionState.DISCONNECTED
                 _micVolumeLevel.value = 0f
+                resetOutputWaveform()
                 drainPendingToFallback()
             }
         })
@@ -653,6 +663,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 }
 
                 if (serverContent.optBoolean("turnComplete", false)) {
+                    resetOutputWaveform()
                     _sessionState.value = GeminiLiveSessionState.LISTENING
                 }
             }
@@ -850,6 +861,9 @@ class GeminiLiveVoiceManager(private val context: Context) {
     }
 
     private fun playRawPcm(pcmBytes: ByteArray) {
+        val frame = outputWaveformAnalyzer.analyzePcm16(pcmBytes)
+        _outputAudioLevel.value = frame.level
+        _outputAudioBands.value = frame.bands
         try {
             audioTrack?.write(pcmBytes, 0, pcmBytes.size)
         } catch (e: Exception) {
@@ -857,7 +871,14 @@ class GeminiLiveVoiceManager(private val context: Context) {
         }
     }
 
+    private fun resetOutputWaveform() {
+        val reset = outputWaveformAnalyzer.reset()
+        _outputAudioLevel.value = reset.level
+        _outputAudioBands.value = reset.bands
+    }
+
     fun stopCurrentPlayback() {
+        resetOutputWaveform()
         try {
             audioTrack?.pause()
             audioTrack?.flush()
@@ -904,6 +925,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
             Log.e(TAG, "Error stopping Live Session: ${e.message}")
         } finally {
             _micVolumeLevel.value = 0f
+            resetOutputWaveform()
             _sessionState.value = GeminiLiveSessionState.DISCONNECTED
         }
     }
