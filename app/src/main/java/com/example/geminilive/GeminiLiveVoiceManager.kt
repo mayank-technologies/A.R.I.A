@@ -345,6 +345,10 @@ class GeminiLiveVoiceManager(private val context: Context) {
             )
     }
 
+    fun isMicCapturingAudio(): Boolean {
+        return audioRecord != null && recordJob?.isActive == true
+    }
+
     /**
      * Sends a text result over the active Gemini Live WebSocket so Gemini speaks it aloud
      * using the configured warm-natural male voice (SELECTED_VOICE_NAME), replacing legacy TTS.

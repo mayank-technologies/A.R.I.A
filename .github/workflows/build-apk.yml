@@ -104,13 +104,18 @@ jobs:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: |
+          sanitize() { printf '%s' "$1" | tr -d '\r\n'; }
           {
-            printf 'GEMINI_API_KEY=%s\n' "${GEMINI_API_KEY:-your_key_here}"
-            printf 'ELEVENLABS_API_KEY=%s\n' "${ELEVENLABS_API_KEY:-your_key_here}"
-            printf 'ELEVENLABS_VOICE_ID=%s\n' "${ELEVENLABS_VOICE_ID:-pNInz6obpgDQGcFmaJgB}"
-            printf 'ANTHROPIC_API_KEY=%s\n' "${ANTHROPIC_API_KEY:-your_key_here}"
+            printf 'GEMINI_API_KEY=%s\n' "$(sanitize "${GEMINI_API_KEY:-your_key_here}")"
+            printf 'ELEVENLABS_API_KEY=%s\n' "$(sanitize "${ELEVENLABS_API_KEY:-your_key_here}")"
+            printf 'ELEVENLABS_VOICE_ID=%s\n' "$(sanitize "${ELEVENLABS_VOICE_ID:-pNInz6obpgDQGcFmaJgB}")"
+            printf 'ANTHROPIC_API_KEY=%s\n' "$(sanitize "${ANTHROPIC_API_KEY:-your_key_here}")"
           } > .env
+          if [ -n "${YOUTUBE_API_KEY:-}" ]; then
+            echo "YOUTUBE_API_KEY=$(sanitize "$YOUTUBE_API_KEY")" >> "$GITHUB_ENV"
+          fi
           echo ".env file generated for BuildConfig injection (values redacted)."
 
       - name: Run unit tests

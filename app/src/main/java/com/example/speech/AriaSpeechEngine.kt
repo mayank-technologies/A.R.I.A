@@ -1,16 +1,23 @@
 package com.example.speech
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.ToneGenerator
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.example.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +38,15 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
+enum class WakeWordState {
+    OFF,
+    STANDBY_LISTENING,
+    TRIGGERED,
+    ACTIVE_COMMAND,
+    PERMISSION_REQUIRED,
+    UNAVAILABLE
+}
+
 /**
  * Advanced ARIA Speech Engine featuring:
  * 1. ElevenLabs Neural Human Voice Synthesis (Adam / Warm Deep Male Voice)
@@ -38,6 +54,7 @@ import java.util.concurrent.TimeUnit
  * 3. Android MediaPlayer for smooth high-fidelity audio output
  * 4. Automatic Seamless Fallback to Native Android TextToSpeech (Male) when offline or on API failure
  * 5. Latency/Synthesizing state indication for UI
+ * 6. JARVIS-grade continuous Wake-Word Listener ('Hey ARC', 'ARC', 'JARVIS') with RMS & partial feedback
  */
 class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListener {
 
@@ -114,11 +131,31 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     private val _isWakeWordModeEnabled = MutableStateFlow(false)
     val isWakeWordModeEnabled: StateFlow<Boolean> = _isWakeWordModeEnabled.asStateFlow()
 
+    private val _wakeWordState = MutableStateFlow(WakeWordState.OFF)
+    val wakeWordState: StateFlow<WakeWordState> = _wakeWordState.asStateFlow()
+
+    private val _partialTranscript = MutableStateFlow("")
+    val partialTranscript: StateFlow<String> = _partialTranscript.asStateFlow()
+
+    private val _lastWakePhrase = MutableStateFlow<String?>(null)
+    val lastWakePhrase: StateFlow<String?> = _lastWakePhrase.asStateFlow()
+
     private val _lastRecognizedText = MutableStateFlow("")
     val lastRecognizedText: StateFlow<String> = _lastRecognizedText.asStateFlow()
 
     private var onSpeechResultListener: ((String) -> Unit)? = null
+    private var onWakeWordDetectedListener: ((WakeWordParseResult, String) -> Unit)? = null
     private var wakeWordJob: Job? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    @Volatile
+    private var isManualCommandListening = false
+
+    @Volatile
+    private var isExternalMicBusy = false
+
+    @Volatile
+    private var partialWakeMatchedInSession = false
 
     init {
         initSpeechRecognizer()
@@ -478,13 +515,69 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
         _isSynthesizing.value = false
     }
 
+    fun hasAudioPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun setOnWakeWordDetectedListener(listener: (WakeWordParseResult, String) -> Unit) {
+        onWakeWordDetectedListener = listener
+    }
+
+    /**
+     * Coordinates hardware microphone ownership with Gemini Live AudioRecord streaming
+     * so SpeechRecognizer does not collide when Gemini Live is actively recording.
+     */
+    fun setExternalMicBusy(busy: Boolean) {
+        if (isExternalMicBusy == busy) return
+        isExternalMicBusy = busy
+        if (busy) {
+            wakeWordJob?.cancel()
+            if (!isManualCommandListening) {
+                try {
+                    speechRecognizer?.cancel()
+                } catch (_: Exception) {
+                }
+                _micVolumeLevel.value = 0f
+                if (_isWakeWordModeEnabled.value) {
+                    _wakeWordState.value = WakeWordState.STANDBY_LISTENING
+                }
+            }
+        } else if (_isWakeWordModeEnabled.value && !isManualCommandListening) {
+            scheduleWakeWordLoop(450L)
+        }
+    }
+
     fun setWakeWordModeEnabled(enabled: Boolean) {
         _isWakeWordModeEnabled.value = enabled
         if (enabled) {
-            scheduleWakeWordLoop(300L)
+            when {
+                !hasAudioPermission() -> {
+                    _wakeWordState.value = WakeWordState.PERMISSION_REQUIRED
+                }
+                !SpeechRecognizer.isRecognitionAvailable(context) -> {
+                    _wakeWordState.value = WakeWordState.UNAVAILABLE
+                }
+                else -> {
+                    _wakeWordState.value = WakeWordState.STANDBY_LISTENING
+                    scheduleWakeWordLoop(300L)
+                }
+            }
         } else {
             wakeWordJob?.cancel()
-            stopListening()
+            partialWakeMatchedInSession = false
+            _partialTranscript.value = ""
+            if (!isManualCommandListening) {
+                try {
+                    speechRecognizer?.cancel()
+                } catch (_: Exception) {
+                }
+                _isListening.value = false
+                _micVolumeLevel.value = 0f
+            }
+            _wakeWordState.value = WakeWordState.OFF
         }
     }
 
@@ -494,117 +587,367 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
         return newState
     }
 
-    fun scheduleWakeWordLoop(delayMs: Long = 1000L) {
+    fun refreshWakeWordAvailability() {
+        if (_isWakeWordModeEnabled.value) {
+            setWakeWordModeEnabled(true)
+        }
+    }
+
+    fun scheduleWakeWordLoop(delayMs: Long = 800L) {
         if (!_isWakeWordModeEnabled.value) return
         wakeWordJob?.cancel()
         wakeWordJob = engineScope.launch(Dispatchers.Main) {
             kotlinx.coroutines.delay(delayMs)
-            if (_isWakeWordModeEnabled.value && !_isSpeaking.value && !_isSynthesizing.value) {
+            if (_isWakeWordModeEnabled.value &&
+                !isManualCommandListening &&
+                !isExternalMicBusy &&
+                !_isSpeaking.value &&
+                !_isSynthesizing.value
+            ) {
                 startWakeWordListening()
             }
         }
     }
 
     private fun startWakeWordListening() {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) return
-        if (_isSpeaking.value || _isSynthesizing.value) return
+        if (!hasAudioPermission()) {
+            _wakeWordState.value = WakeWordState.PERMISSION_REQUIRED
+            _isListening.value = false
+            return
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            _wakeWordState.value = WakeWordState.UNAVAILABLE
+            _isListening.value = false
+            return
+        }
+        if (isExternalMicBusy || isManualCommandListening || _isSpeaking.value || _isSynthesizing.value) {
+            return
+        }
+
+        if (speechRecognizer == null) {
+            initSpeechRecognizer()
+        }
+
+        partialWakeMatchedInSession = false
+        _partialTranscript.value = ""
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for 'Hey ARC'...")
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for 'Hey ARC' or 'JARVIS'...")
         }
         try {
-            _isListening.value = true
+            _wakeWordState.value = WakeWordState.STANDBY_LISTENING
+            _isListening.value = false
             _micVolumeLevel.value = 0f
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
-            _isListening.value = false
             _micVolumeLevel.value = 0f
             Log.e("AriaSpeechEngine", "Error starting wake word listener: ${e.message}")
-            scheduleWakeWordLoop(2000L)
+            scheduleWakeWordLoop(1800L)
         }
     }
 
     private fun initSpeechRecognizer() {
-        if (SpeechRecognizer.isRecognitionAvailable(context)) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
-            speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    _isListening.value = true
-                    _micVolumeLevel.value = 0f
+        val initBlock = {
+            if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                try {
+                    speechRecognizer?.destroy()
+                } catch (_: Exception) {
                 }
-
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {
-                    val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
-                    _micVolumeLevel.value = (_micVolumeLevel.value * 0.3f + normalized * 0.7f).coerceIn(0f, 1f)
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                    setRecognitionListener(createRecognitionListener())
                 }
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {
-                    _isListening.value = false
-                    _micVolumeLevel.value = 0f
-                }
-
-                override fun onError(error: Int) {
-                    _isListening.value = false
-                    _micVolumeLevel.value = 0f
-                    if (_isWakeWordModeEnabled.value && !_isSpeaking.value) {
-                        scheduleWakeWordLoop(1200L)
-                    }
-                }
-
-                override fun onResults(results: Bundle?) {
-                    _isListening.value = false
-                    _micVolumeLevel.value = 0f
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    if (!matches.isNullOrEmpty()) {
-                        val text = matches[0]
-                        _lastRecognizedText.value = text
-                        onSpeechResultListener?.invoke(text)
-                    }
-                    if (_isWakeWordModeEnabled.value && !_isSpeaking.value) {
-                        scheduleWakeWordLoop(1500L)
-                    }
-                }
-
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            initBlock()
+        } else {
+            mainHandler.post { initBlock() }
         }
     }
 
-    fun startListening(onResult: (String) -> Unit) {
-        this.onSpeechResultListener = onResult
-        _isListening.value = true
-        _micVolumeLevel.value = 0f
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for ARC command...")
+    private fun createRecognitionListener(): RecognitionListener {
+        return object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                if (isManualCommandListening) {
+                    _isListening.value = true
+                    if (_isWakeWordModeEnabled.value) {
+                        _wakeWordState.value = WakeWordState.ACTIVE_COMMAND
+                    }
+                } else if (_isWakeWordModeEnabled.value) {
+                    _wakeWordState.value = WakeWordState.STANDBY_LISTENING
+                }
+                _micVolumeLevel.value = 0f
+            }
+
+            override fun onBeginningOfSpeech() {}
+
+            override fun onRmsChanged(rmsdB: Float) {
+                val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+                _micVolumeLevel.value = (_micVolumeLevel.value * 0.3f + normalized * 0.7f).coerceIn(0f, 1f)
+            }
+
+            override fun onBufferReceived(buffer: ByteArray?) {}
+
+            override fun onEndOfSpeech() {
+                if (isManualCommandListening) {
+                    _isListening.value = false
+                }
+                _micVolumeLevel.value = 0f
+            }
+
+            override fun onError(error: Int) {
+                _micVolumeLevel.value = 0f
+                val wasManual = isManualCommandListening
+                isManualCommandListening = false
+                _isListening.value = false
+
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    _wakeWordState.value = WakeWordState.PERMISSION_REQUIRED
+                    return
+                }
+
+                if (wasManual) {
+                    onSpeechResultListener?.invoke("")
+                }
+
+                // If partial speech already detected a bare wake word before timeout/no-match, trigger ARC cleanly
+                val partialSnap = _partialTranscript.value
+                if (!wasManual && partialWakeMatchedInSession && partialSnap.isNotBlank()) {
+                    partialWakeMatchedInSession = false
+                    _partialTranscript.value = ""
+                    val parsed = parseWakeWord(partialSnap)
+                    if (parsed.hasWakeWord) {
+                        _lastWakePhrase.value = parsed.matchedWakeWord
+                        _wakeWordState.value = WakeWordState.TRIGGERED
+                        _lastRecognizedText.value = partialSnap
+                        onWakeWordDetectedListener?.invoke(parsed, partialSnap)
+                        return
+                    }
+                }
+
+                partialWakeMatchedInSession = false
+                _partialTranscript.value = ""
+
+                if (_isWakeWordModeEnabled.value && !_isSpeaking.value && !isExternalMicBusy) {
+                    val retryDelay = when (error) {
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 1400L
+                        SpeechRecognizer.ERROR_NO_MATCH,
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 650L
+                        else -> 1200L
+                    }
+                    if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                        initSpeechRecognizer()
+                    }
+                    _wakeWordState.value = WakeWordState.STANDBY_LISTENING
+                    scheduleWakeWordLoop(retryDelay)
+                } else if (!_isWakeWordModeEnabled.value) {
+                    _wakeWordState.value = WakeWordState.OFF
+                }
+            }
+
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val text = matches?.firstOrNull().orEmpty()
+                processRecognizedSpeech(text = text, isPartial = false)
+            }
+
+            override fun onPartialResults(partialResults: Bundle?) {
+                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val text = matches?.firstOrNull().orEmpty()
+                if (text.isNotBlank()) {
+                    processRecognizedSpeech(text = text, isPartial = true)
+                }
+            }
+
+            override fun onEvent(eventType: Int, params: Bundle?) {}
         }
-        try {
-            speechRecognizer?.startListening(intent)
-        } catch (e: Exception) {
+    }
+
+    /**
+     * Handles both partial and final microphone transcripts cleanly for manual commands and
+     * continuous JARVIS/ARC wake-word detection. Also directly testable in JVM unit tests.
+     */
+    fun processRecognizedSpeech(text: String, isPartial: Boolean) {
+        val trimmed = text.trim()
+
+        if (isManualCommandListening) {
+            if (isPartial) {
+                if (trimmed.isNotBlank()) {
+                    _partialTranscript.value = trimmed
+                }
+                return
+            }
+
+            isManualCommandListening = false
             _isListening.value = false
             _micVolumeLevel.value = 0f
-            Log.e("AriaSpeechEngine", "Error starting speech recognition: ${e.message}")
+            _partialTranscript.value = ""
+
+            if (trimmed.isNotBlank()) {
+                _lastRecognizedText.value = trimmed
+                onSpeechResultListener?.invoke(trimmed)
+            } else {
+                onSpeechResultListener?.invoke("")
+            }
+
+            if (_isWakeWordModeEnabled.value && !_isSpeaking.value && !isExternalMicBusy) {
+                _wakeWordState.value = WakeWordState.STANDBY_LISTENING
+                scheduleWakeWordLoop(1200L)
+            } else if (!_isWakeWordModeEnabled.value) {
+                _wakeWordState.value = WakeWordState.OFF
+            }
+            return
+        }
+
+        if (!_isWakeWordModeEnabled.value) return
+
+        if (isPartial) {
+            if (trimmed.isNotBlank()) {
+                _partialTranscript.value = trimmed
+                val parsed = parseWakeWord(trimmed)
+                if (parsed.hasWakeWord && !partialWakeMatchedInSession) {
+                    partialWakeMatchedInSession = true
+                    _lastWakePhrase.value = parsed.matchedWakeWord
+                    _wakeWordState.value = WakeWordState.TRIGGERED
+                    playWakeActivationChime()
+                }
+            }
+            return
+        }
+
+        // Final wake-standby result
+        val alreadyChimed = partialWakeMatchedInSession
+        partialWakeMatchedInSession = false
+        _micVolumeLevel.value = 0f
+        _partialTranscript.value = ""
+
+        if (trimmed.isNotBlank()) {
+            val parsed = parseWakeWord(trimmed)
+            if (parsed.hasWakeWord) {
+                _lastWakePhrase.value = parsed.matchedWakeWord
+                _wakeWordState.value = WakeWordState.TRIGGERED
+                _lastRecognizedText.value = trimmed
+                if (!alreadyChimed) {
+                    playWakeActivationChime()
+                }
+                onWakeWordDetectedListener?.invoke(parsed, trimmed)
+                return
+            }
+        }
+
+        if (!_isSpeaking.value && !isExternalMicBusy) {
+            _wakeWordState.value = WakeWordState.STANDBY_LISTENING
+            scheduleWakeWordLoop(500L)
+        }
+    }
+
+    /**
+     * Marks wake state as actively listening for a follow-up command after wake word activation.
+     */
+    fun startListening(onResult: (String) -> Unit) {
+        this.onSpeechResultListener = onResult
+        if (!hasAudioPermission()) {
+            _isListening.value = false
+            _wakeWordState.value = WakeWordState.PERMISSION_REQUIRED
+            return
+        }
+        wakeWordJob?.cancel()
+        isManualCommandListening = true
+        partialWakeMatchedInSession = false
+        _partialTranscript.value = ""
+        _isListening.value = true
+        _micVolumeLevel.value = 0f
+        if (_isWakeWordModeEnabled.value) {
+            _wakeWordState.value = WakeWordState.ACTIVE_COMMAND
+        }
+
+        val startBlock = {
+            if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                if (speechRecognizer == null) {
+                    initSpeechRecognizer()
+                }
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for ARC command...")
+                }
+                try {
+                    speechRecognizer?.cancel()
+                    speechRecognizer?.startListening(intent)
+                } catch (e: Exception) {
+                    isManualCommandListening = false
+                    _isListening.value = false
+                    _micVolumeLevel.value = 0f
+                    Log.e("AriaSpeechEngine", "Error starting speech recognition: ${e.message}")
+                }
+            } else {
+                isManualCommandListening = false
+                _isListening.value = false
+                _wakeWordState.value = WakeWordState.UNAVAILABLE
+            }
+        }
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            startBlock()
+        } else {
+            mainHandler.post { startBlock() }
         }
     }
 
     fun stopListening() {
         wakeWordJob?.cancel()
-        speechRecognizer?.stopListening()
+        isManualCommandListening = false
+        partialWakeMatchedInSession = false
+        _partialTranscript.value = ""
         _isListening.value = false
         _micVolumeLevel.value = 0f
+        if (!_isWakeWordModeEnabled.value) {
+            _wakeWordState.value = WakeWordState.OFF
+        }
+        val stopBlock = {
+            try {
+                speechRecognizer?.stopListening()
+            } catch (_: Exception) {
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            stopBlock()
+        } else {
+            mainHandler.post { stopBlock() }
+        }
+    }
+
+    private fun playWakeActivationChime() {
+        try {
+            val toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 75)
+            toneGen.startTone(ToneGenerator.TONE_PROP_BEEP2, 140)
+            mainHandler.postDelayed({
+                try {
+                    toneGen.release()
+                } catch (_: Exception) {
+                }
+            }, 220L)
+        } catch (_: Throwable) {
+            // Ignore in headless/Robolectric environments without audio hardware
+        }
     }
 
     fun destroy() {
         wakeWordJob?.cancel()
         stopSpeaking()
         _micVolumeLevel.value = 0f
+        _partialTranscript.value = ""
+        _wakeWordState.value = WakeWordState.OFF
         nativeTts?.shutdown()
-        speechRecognizer?.destroy()
+        try {
+            speechRecognizer?.destroy()
+        } catch (_: Exception) {
+        }
     }
 
     companion object {
@@ -613,25 +956,36 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
         data class WakeWordParseResult(
             val hasWakeWord: Boolean,
             val isOnlyWakeWord: Boolean,
-            val command: String
+            val command: String,
+            val matchedWakeWord: String = ""
+        )
+
+        private val wakePrefixes = listOf(
+            "hey jarvis", "ok jarvis", "hi jarvis", "hello jarvis", "jarvis", "j.a.r.v.i.s.",
+            "hey arc", "ok arc", "hi arc", "hello arc", "namaste arc", "listen arc",
+            "hey a.r.c.", "ok a.r.c.", "hi a.r.c.", "a.r.c.", "arc",
+            "hey ark", "ok ark", "hi ark", "hello ark", "ark",
+            "hey aria", "ok aria", "hi aria", "hello aria", "namaste aria", "listen aria",
+            "hey area", "ok area", "hi area", "hello area",
+            "hey a.r.i.a.", "ok a.r.i.a.", "hi a.r.i.a.",
+            "aria", "area", "a.r.i.a."
         )
 
         fun parseWakeWord(input: String): WakeWordParseResult {
             val trimmed = input.trim()
+            if (trimmed.isEmpty()) {
+                return WakeWordParseResult(hasWakeWord = false, isOnlyWakeWord = false, command = "")
+            }
             val lower = trimmed.lowercase(Locale.ROOT)
-            val wakePrefixes = listOf(
-                "hey arc", "ok arc", "hi arc", "hello arc", "namaste arc", "listen arc",
-                "arc", "a.r.c.", "hey a.r.c.", "ok a.r.c.", "hi a.r.c.",
-                "hey ark", "ok ark", "hi ark", "hello ark", "ark",
-                "hey aria", "ok aria", "hi aria", "hello aria", "namaste aria", "listen aria",
-                "hey area", "ok area", "hi area", "hello area",
-                "hey a.r.i.a.", "ok a.r.i.a.", "hi a.r.i.a.",
-                "aria", "area", "a.r.i.a."
-            )
 
             for (prefix in wakePrefixes) {
                 if (lower == prefix) {
-                    return WakeWordParseResult(hasWakeWord = true, isOnlyWakeWord = true, command = "")
+                    return WakeWordParseResult(
+                        hasWakeWord = true,
+                        isOnlyWakeWord = true,
+                        command = "",
+                        matchedWakeWord = prefix
+                    )
                 }
             }
 
@@ -641,19 +995,26 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                     return WakeWordParseResult(
                         hasWakeWord = true,
                         isOnlyWakeWord = cleanCmd.isEmpty(),
-                        command = cleanCmd
+                        command = cleanCmd,
+                        matchedWakeWord = prefix
                     )
                 }
             }
 
-            for (prefix in listOf("hey arc", "ok arc", "hi arc", "hey ark", "ok ark", "arc", "hey aria", "ok aria", "hi aria", "hey area", "ok area")) {
-                val idx = lower.indexOf(prefix)
-                if (idx != -1) {
-                    val remaining = trimmed.substring(idx + prefix.length).trim().trimStart(',', '.', ':', ' ').trim()
+            // Word-boundary inline match so words like "arcade" or "search" never trigger "arc"
+            for (prefix in wakePrefixes) {
+                val regex = Regex("(?<!\\p{L})${Regex.escape(prefix)}(?!\\p{L})")
+                val match = regex.find(lower)
+                if (match != null) {
+                    val remaining = trimmed.substring(match.range.last + 1)
+                        .trim()
+                        .trimStart(',', '.', ':', ' ')
+                        .trim()
                     return WakeWordParseResult(
                         hasWakeWord = true,
                         isOnlyWakeWord = remaining.isEmpty(),
-                        command = remaining
+                        command = remaining,
+                        matchedWakeWord = prefix
                     )
                 }
             }

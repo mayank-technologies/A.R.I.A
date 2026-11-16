@@ -12,6 +12,9 @@ import com.example.data.AriaDatabase
 import com.example.data.ReminderEntity
 import com.example.data.VoiceHistoryEntity
 import com.example.speech.AriaSpeechEngine
+import com.example.speech.WakeWordState
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -83,6 +86,16 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     val isSpeaking: StateFlow<Boolean> = speechEngine.isSpeaking
     val isSynthesizing: StateFlow<Boolean> = speechEngine.isSynthesizing
     val isWakeWordModeEnabled: StateFlow<Boolean> = speechEngine.isWakeWordModeEnabled
+    val wakeWordState: StateFlow<WakeWordState> = speechEngine.wakeWordState
+    val partialTranscript: StateFlow<String> = speechEngine.partialTranscript
+    val lastWakePhrase: StateFlow<String?> = speechEngine.lastWakePhrase
+
+    private val _needsMicPermission = MutableStateFlow(!speechEngine.hasAudioPermission())
+    val needsMicPermission: StateFlow<Boolean> = _needsMicPermission.asStateFlow()
+
+    private val _wakeFlashActive = MutableStateFlow(false)
+    val wakeFlashActive: StateFlow<Boolean> = _wakeFlashActive.asStateFlow()
+    private var wakeFlashJob: Job? = null
 
     val micVolumeLevel: StateFlow<Float> = combine(
         speechEngine.micVolumeLevel,
@@ -98,13 +111,71 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleWakeWordMode(): Boolean {
         val newState = speechEngine.toggleWakeWordMode()
         prefs.edit().putBoolean("wake_word_enabled", newState).apply()
+        _needsMicPermission.value = !speechEngine.hasAudioPermission()
         if (newState) {
-            _latestResponse.value = "Wake-Word Detection Active 🎙️ Say 'Hey ARC' anytime hands-free!"
-            speakResponse("Wake word detection active, Boss! Say Hey ARC anytime.")
+            if (!speechEngine.hasAudioPermission()) {
+                _latestResponse.value = "Microphone permission needed for 'Hey ARC' / 'JARVIS' wake-word detection."
+            } else {
+                _latestResponse.value = "Wake-Word Listener Active 🎙️ Say 'Hey ARC' or 'JARVIS' anytime hands-free!"
+                addActivityLog("🎙️", "Wake-Word Armed", "Listening for 'Hey ARC' & 'JARVIS'")
+            }
         } else {
+            _wakeFlashActive.value = false
             _latestResponse.value = "Wake-Word Detection Paused."
+            addActivityLog("⏸️", "Wake-Word Paused", "Hands-free mic standby turned off")
         }
         return newState
+    }
+
+    fun onMicPermissionUpdated() {
+        val granted = speechEngine.hasAudioPermission()
+        _needsMicPermission.value = !granted
+        if (granted) {
+            addActivityLog("🎙️", "Microphone Active", "JARVIS / Hey ARC wake-word ready")
+            if (_isArcPoweredOn.value && prefs.getBoolean("wake_word_enabled", true)) {
+                speechEngine.setExternalMicBusy(geminiLiveManager.isMicCapturingAudio())
+                speechEngine.setWakeWordModeEnabled(true)
+            } else {
+                speechEngine.refreshWakeWordAvailability()
+            }
+        }
+    }
+
+    private fun triggerWakeFlash() {
+        wakeFlashJob?.cancel()
+        _wakeFlashActive.value = true
+        wakeFlashJob = viewModelScope.launch {
+            delay(1700L)
+            _wakeFlashActive.value = false
+        }
+    }
+
+    fun handleWakeWordTrigger(
+        parseResult: AriaSpeechEngine.Companion.WakeWordParseResult,
+        rawTranscript: String
+    ) {
+        if (!parseResult.hasWakeWord) return
+        val phraseLabel = parseResult.matchedWakeWord.ifBlank { "ARC" }.uppercase()
+        if (!_isArcPoweredOn.value) {
+            _isArcPoweredOn.value = true
+        }
+        triggerWakeFlash()
+        addActivityLog("⚡", "Wake Word: $phraseLabel", "Triggered via voice: \"$rawTranscript\"")
+
+        try {
+            com.example.assistant.overlay.AriaEdgeGlowOverlayManager.showEdgeGlow(
+                getApplication(),
+                com.example.assistant.overlay.AriaEdgeGlowView.GlowState.LISTENING
+            )
+        } catch (_: Exception) {
+        }
+
+        if (!parseResult.isOnlyWakeWord && parseResult.command.isNotBlank()) {
+            submitTextCommand(parseResult.command)
+        } else {
+            _latestResponse.value = "At your service, Boss. Listening..."
+            startListening()
+        }
     }
 
     val reminders: StateFlow<List<ReminderEntity>> = dao.getAllReminders()
@@ -184,6 +255,9 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
                 speechEngine.speak(pendingText)
             }
         }
+        speechEngine.setOnWakeWordDetectedListener { parseResult, rawTranscript ->
+            handleWakeWordTrigger(parseResult, rawTranscript)
+        }
         checkOnboardingStatus()
         // Sync local TTS speaking -> IDLE transition
         viewModelScope.launch {
@@ -195,9 +269,34 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        // Sync Gemini Live speaking/listening state with HUD status
+        // Sync active SpeechRecognizer command listening -> HUD LISTENING status
+        viewModelScope.launch {
+            speechEngine.isListening.collect { listening ->
+                if (_isArcPoweredOn.value) {
+                    if (listening) {
+                        _assistantStatus.value = AssistantStatus.LISTENING
+                    } else if (_assistantStatus.value == AssistantStatus.LISTENING &&
+                        geminiLiveManager.sessionState.value != com.example.geminilive.GeminiLiveSessionState.LISTENING
+                    ) {
+                        _assistantStatus.value = AssistantStatus.IDLE
+                    }
+                }
+            }
+        }
+        // Flash HUD immediately on partial or final wake-word detection
+        viewModelScope.launch {
+            speechEngine.wakeWordState.collect { state ->
+                if (state == WakeWordState.TRIGGERED && _isArcPoweredOn.value) {
+                    triggerWakeFlash()
+                } else if (state == WakeWordState.PERMISSION_REQUIRED) {
+                    _needsMicPermission.value = true
+                }
+            }
+        }
+        // Sync Gemini Live speaking/listening state with HUD status & coordinate mic hardware
         viewModelScope.launch {
             geminiLiveManager.sessionState.collect { liveState ->
+                speechEngine.setExternalMicBusy(geminiLiveManager.isMicCapturingAudio())
                 if (_isArcPoweredOn.value) {
                     when (liveState) {
                         com.example.geminilive.GeminiLiveSessionState.SPEAKING -> {
@@ -211,6 +310,17 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         }
                         else -> Unit
+                    }
+                }
+            }
+        }
+        // Highlight JARVIS / Hey ARC wake word if heard inside Gemini Live input transcription
+        viewModelScope.launch {
+            geminiLiveManager.userInputTranscript.collect { transcript ->
+                if (_isArcPoweredOn.value && isWakeWordModeEnabled.value && transcript.isNotBlank()) {
+                    val parsed = AriaSpeechEngine.parseWakeWord(transcript)
+                    if (parsed.hasWakeWord) {
+                        triggerWakeFlash()
                     }
                 }
             }
@@ -243,6 +353,10 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
             if (isComplete && hasCompletedPermissions) {
                 if (_isGeminiLiveMode.value && geminiLiveManager.hasValidApiKey()) {
                     geminiLiveManager.startLiveSession()
+                }
+                if (prefs.getBoolean("wake_word_enabled", true)) {
+                    speechEngine.setExternalMicBusy(geminiLiveManager.isMicCapturingAudio())
+                    speechEngine.setWakeWordModeEnabled(true)
                 }
                 triggerBriefingSummary()
             } else {
@@ -422,8 +536,13 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
             .apply()
 
         _isPermissionsGranted.value = true
+        _needsMicPermission.value = !speechEngine.hasAudioPermission()
         if (_isGeminiLiveMode.value && geminiLiveManager.hasValidApiKey()) {
             geminiLiveManager.startLiveSession()
+        }
+        if (prefs.getBoolean("wake_word_enabled", true)) {
+            speechEngine.setExternalMicBusy(geminiLiveManager.isMicCapturingAudio())
+            speechEngine.setWakeWordModeEnabled(true)
         }
         triggerBriefingSummary()
 

@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -7,13 +8,18 @@ import android.content.IntentFilter
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,15 +30,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -51,6 +60,7 @@ import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -95,8 +105,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -113,6 +126,7 @@ import com.example.assistant.ArcLocationManager
 import com.example.assistant.DeviceClockHelper
 import com.example.assistant.battery.AriaBatterySaverManager
 import com.example.geminilive.GeminiLiveSessionState
+import com.example.speech.WakeWordState
 import com.example.ui.AriaViewModel
 import com.example.ui.AssistantStatus
 import com.example.ui.components.ListeningPulseIndicator
@@ -254,6 +268,11 @@ fun VoiceHudScreen(
     val isMuted by viewModel.isMuted.collectAsState()
     val isSpeaking by viewModel.isSpeaking.collectAsState()
     val isWakeWordModeEnabled by viewModel.isWakeWordModeEnabled.collectAsState()
+    val wakeWordState by viewModel.wakeWordState.collectAsState()
+    val partialTranscript by viewModel.partialTranscript.collectAsState()
+    val lastWakePhrase by viewModel.lastWakePhrase.collectAsState()
+    val needsMicPermission by viewModel.needsMicPermission.collectAsState()
+    val wakeFlashActive by viewModel.wakeFlashActive.collectAsState()
     val isGeminiLiveMode by viewModel.isGeminiLiveMode.collectAsState()
     val geminiLiveState by viewModel.geminiLiveManager.sessionState.collectAsState()
     val micVolumeLevel by viewModel.micVolumeLevel.collectAsState()
@@ -264,11 +283,23 @@ fun VoiceHudScreen(
     val manualBatteryOverride by AriaBatterySaverManager.manualOverride.collectAsState()
 
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     var hasPromptedLocationOnce by remember { mutableStateOf(false) }
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
         viewModel.onLocationPermissionUpdated()
+    }
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        viewModel.onMicPermissionUpdated()
+    }
+
+    LaunchedEffect(wakeWordState, wakeFlashActive) {
+        if (wakeFlashActive || wakeWordState == WakeWordState.TRIGGERED) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
     }
 
     LaunchedEffect(needsLocationPermission) {
@@ -343,8 +374,9 @@ fun VoiceHudScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .then(if (isCompactHeight) Modifier.verticalScroll(scrollState) else Modifier)
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
@@ -429,7 +461,28 @@ fun VoiceHudScreen(
                 }
 
                 // -------------------------------------------------------------
-                // 2. CENTRAL TRANSPARENT CORE PARTICLE AVATAR + POWER BUTTON + STATUS
+                // 1B. JARVIS-STYLE WAKE WORD EAR STATUS PILL
+                // -------------------------------------------------------------
+                WakeWordHudPill(
+                    isPoweredOn = isArcPoweredOn,
+                    isWakeWordEnabled = isWakeWordModeEnabled,
+                    wakeWordState = wakeWordState,
+                    wakeFlashActive = wakeFlashActive,
+                    lastWakePhrase = lastWakePhrase,
+                    micVolume = micVolumeLevel,
+                    needsMicPermission = needsMicPermission,
+                    disableAnimations = isBatterySaverActive,
+                    onClick = {
+                        if (needsMicPermission) {
+                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        } else {
+                            viewModel.toggleWakeWordMode()
+                        }
+                    }
+                )
+
+                // -------------------------------------------------------------
+                // 2. CENTRAL TRANSPARENT CORE PARTICLE AVATAR + SONAR RINGS + POWER + STATUS
                 // -------------------------------------------------------------
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -441,24 +494,42 @@ fun VoiceHudScreen(
                         geminiLiveState == GeminiLiveSessionState.LISTENING -> AssistantStatus.LISTENING
                         else -> assistantStatus
                     }
+                    val isActivelyListening = effectiveStatus == AssistantStatus.LISTENING ||
+                        wakeFlashActive ||
+                        wakeWordState == WakeWordState.TRIGGERED ||
+                        wakeWordState == WakeWordState.ACTIVE_COMMAND
 
-                    // Transparent unclipped glow frame for the dense CORE particle sphere
+                    // Transparent unclipped glow frame with concentric sonar listening rings
                     Box(
                         modifier = Modifier
                             .size(avatarSize)
-                            .clickable { viewModel.activateArcWithGreeting() }
+                            .clickable {
+                                if (needsMicPermission) {
+                                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                } else {
+                                    viewModel.activateArcWithGreeting()
+                                }
+                            }
                             .testTag("central_activate_arc_orb"),
                         contentAlignment = Alignment.Center
                     ) {
+                        WakeListeningSonarRings(
+                            isStandbyWake = isArcPoweredOn && isWakeWordModeEnabled && !isActivelyListening,
+                            isActiveListening = isActivelyListening,
+                            isWakeTriggered = wakeFlashActive || wakeWordState == WakeWordState.TRIGGERED,
+                            micVolume = micVolumeLevel,
+                            disableAnimations = isBatterySaverActive || !isArcPoweredOn,
+                            modifier = Modifier.fillMaxSize()
+                        )
                         ParticleAvatar3D(
-                            status = effectiveStatus,
+                            status = if (isActivelyListening && isArcPoweredOn) AssistantStatus.LISTENING else effectiveStatus,
                             micVolume = micVolumeLevel,
                             disableAnimations = isBatterySaverActive || !isArcPoweredOn,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // MAX-Inspired Central Circular Power-Button Toggle (ON = pulsing glow, OFF = dim slate)
                     ArcPowerButton(
@@ -470,19 +541,25 @@ fun VoiceHudScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Centered Status Subtitle ("TAP TO START" when OFF, active state when ON)
-                    val subtitleText = when (effectiveStatus) {
-                        AssistantStatus.SLEEP -> "TAP TO START"
-                        AssistantStatus.LISTENING -> "LISTENING..."
-                        AssistantStatus.PROCESSING -> "THINKING..."
-                        AssistantStatus.SPEAKING -> "SPEAKING..."
+                    // Centered Status Subtitle ("TAP TO START" when OFF, wake/listening feedback when ON)
+                    val subtitleText = when {
+                        !isArcPoweredOn || effectiveStatus == AssistantStatus.SLEEP -> "TAP TO START"
+                        wakeFlashActive || wakeWordState == WakeWordState.TRIGGERED ->
+                            "WAKE DETECTED · \"${(lastWakePhrase ?: "ARC").uppercase()}\""
+                        effectiveStatus == AssistantStatus.LISTENING -> "LISTENING FOR COMMAND..."
+                        effectiveStatus == AssistantStatus.PROCESSING -> "THINKING..."
+                        effectiveStatus == AssistantStatus.SPEAKING -> "SPEAKING..."
+                        isWakeWordModeEnabled && wakeWordState == WakeWordState.STANDBY_LISTENING ->
+                            "SAY \"HEY ARC\" OR \"JARVIS\""
                         else -> "ARC VOICE ASSISTANT"
                     }
-                    val subtitleColor = when (effectiveStatus) {
-                        AssistantStatus.SLEEP -> TextMuted
-                        AssistantStatus.LISTENING -> ElectricCyan
-                        AssistantStatus.PROCESSING -> HologramBlue
-                        AssistantStatus.SPEAKING -> ElectricCyan
+                    val subtitleColor = when {
+                        !isArcPoweredOn || effectiveStatus == AssistantStatus.SLEEP -> TextMuted
+                        wakeFlashActive || wakeWordState == WakeWordState.TRIGGERED -> ElectricEmerald
+                        effectiveStatus == AssistantStatus.LISTENING -> ElectricCyan
+                        effectiveStatus == AssistantStatus.PROCESSING -> HologramBlue
+                        effectiveStatus == AssistantStatus.SPEAKING -> ElectricCyan
+                        isWakeWordModeEnabled && wakeWordState == WakeWordState.STANDBY_LISTENING -> HologramBlue
                         else -> TextSecondary
                     }
 
@@ -493,7 +570,7 @@ fun VoiceHudScreen(
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             fontFamily = FontFamily.Monospace,
-                            letterSpacing = 2.6.sp,
+                            letterSpacing = 2.4.sp,
                             shadow = if (effectiveStatus != AssistantStatus.SLEEP) {
                                 Shadow(
                                     color = subtitleColor.copy(alpha = 0.45f),
@@ -506,12 +583,49 @@ fun VoiceHudScreen(
                         modifier = Modifier.testTag("arc_status_subtitle")
                     )
 
-                    // Subtle audio waveform indicator only while powered ON and listening
+                    // Mic-reactive waveform pill when wake-triggered or actively listening
                     ListeningPulseIndicator(
-                        isListening = effectiveStatus == AssistantStatus.LISTENING,
+                        isListening = isArcPoweredOn && isActivelyListening,
+                        micVolume = micVolumeLevel,
+                        label = if (wakeFlashActive || wakeWordState == WakeWordState.TRIGGERED) {
+                            "ARC ACTIVATED"
+                        } else {
+                            "LISTENING"
+                        },
+                        accentColor = if (wakeFlashActive || wakeWordState == WakeWordState.TRIGGERED) {
+                            ElectricEmerald
+                        } else {
+                            ElectricCyan
+                        },
                         disableAnimations = isBatterySaverActive,
-                        modifier = Modifier.padding(top = 4.dp)
+                        modifier = Modifier.padding(top = 6.dp)
                     )
+
+                    // Live Partial Speech Caption Pill so user sees microphone hearing words in real time
+                    AnimatedVisibility(
+                        visible = isArcPoweredOn && partialTranscript.isNotBlank(),
+                        enter = fadeIn(tween(150)),
+                        exit = fadeOut(tween(180))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 6.dp, start = 16.dp, end = 16.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(SurfaceDark.copy(alpha = 0.78f))
+                                .border(1.dp, ElectricCyan.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .testTag("live_partial_transcript_pill")
+                        ) {
+                            Text(
+                                text = "\"$partialTranscript\"",
+                                color = TextPrimary,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
 
                 // -------------------------------------------------------------
@@ -613,7 +727,13 @@ fun VoiceHudScreen(
                     assistantStatus = bottomStatus,
                     disableAnimations = isBatterySaverActive,
                     onScreenVisionClick = { viewModel.submitTextCommand("read screen") },
-                    onMicClick = { viewModel.activateArcWithGreeting() },
+                    onMicClick = {
+                        if (needsMicPermission) {
+                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        } else {
+                            viewModel.activateArcWithGreeting()
+                        }
+                    },
                     onChatClick = { showChatSheet = true }
                 )
             }
@@ -1658,5 +1778,192 @@ private fun DrawerToggleChip(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+/**
+ * Sleek JARVIS-style HUD pill indicating continuous Wake Word microphone readiness,
+ * live sound level micro-equalizer bars, and instant wake activation feedback.
+ */
+@Composable
+private fun WakeWordHudPill(
+    isPoweredOn: Boolean,
+    isWakeWordEnabled: Boolean,
+    wakeWordState: WakeWordState,
+    wakeFlashActive: Boolean,
+    lastWakePhrase: String?,
+    micVolume: Float,
+    needsMicPermission: Boolean,
+    disableAnimations: Boolean,
+    onClick: () -> Unit
+) {
+    val accent = when {
+        !isPoweredOn -> TextMuted
+        needsMicPermission || wakeWordState == WakeWordState.PERMISSION_REQUIRED -> WarningAmber
+        wakeFlashActive || wakeWordState == WakeWordState.TRIGGERED -> ElectricEmerald
+        wakeWordState == WakeWordState.ACTIVE_COMMAND -> ElectricCyan
+        isWakeWordEnabled && wakeWordState == WakeWordState.STANDBY_LISTENING -> ElectricCyan
+        else -> TextSecondary
+    }
+
+    val labelText = when {
+        !isPoweredOn -> "WAKE EAR: STANDBY"
+        needsMicPermission || wakeWordState == WakeWordState.PERMISSION_REQUIRED -> "ENABLE MIC FOR 'HEY ARC'"
+        wakeFlashActive || wakeWordState == WakeWordState.TRIGGERED ->
+            "JARVIS WAKE: \"${(lastWakePhrase ?: "ARC").uppercase()}\""
+        wakeWordState == WakeWordState.ACTIVE_COMMAND -> "MIC ACTIVE · LISTENING"
+        isWakeWordEnabled && wakeWordState == WakeWordState.STANDBY_LISTENING ->
+            "WAKE EAR ACTIVE · 'HEY ARC' / 'JARVIS'"
+        wakeWordState == WakeWordState.UNAVAILABLE -> "SPEECH SERVICE UNAVAILABLE"
+        else -> "WAKE EAR: OFF · TAP TO ARM"
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "wake_pill_pulse")
+    val dotPulse by infiniteTransition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = if (wakeFlashActive || wakeWordState == WakeWordState.TRIGGERED) 420 else 1400,
+                easing = FastOutSlowInEasing
+            ),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "wake_dot_alpha"
+    )
+
+    val effectiveAlpha = if (disableAnimations) 0.85f else dotPulse
+    val isLiveHearing = isPoweredOn && isWakeWordEnabled &&
+        (wakeWordState == WakeWordState.STANDBY_LISTENING ||
+            wakeWordState == WakeWordState.ACTIVE_COMMAND ||
+            wakeWordState == WakeWordState.TRIGGERED ||
+            wakeFlashActive)
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(22.dp),
+        color = SurfaceDark.copy(alpha = if (wakeFlashActive) 0.82f else 0.56f),
+        border = BorderStroke(
+            width = if (wakeFlashActive || wakeWordState == WakeWordState.TRIGGERED) 1.5.dp else 1.dp,
+            color = accent.copy(alpha = if (isLiveHearing) 0.65f else 0.36f)
+        ),
+        modifier = Modifier
+            .defaultMinSize(minHeight = 48.dp)
+            .testTag("wake_word_hud_pill")
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(accent.copy(alpha = if (isLiveHearing) effectiveAlpha else 0.6f))
+            )
+            Icon(
+                imageVector = if (needsMicPermission) Icons.Default.MicOff else Icons.Default.GraphicEq,
+                contentDescription = "Wake Word Microphone Status",
+                tint = accent,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = labelText,
+                color = if (isLiveHearing || needsMicPermission) accent else TextSecondary,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 0.9.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (isLiveHearing) {
+                val vol = micVolume.coerceIn(0f, 1f)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    val bars = listOf(0.45f, 0.95f, 0.65f)
+                    bars.forEach { weight ->
+                        val h = (4f + (vol * 10f * weight) + if (!disableAnimations) effectiveAlpha * 3f else 1f)
+                            .coerceIn(4f, 16f)
+                        Box(
+                            modifier = Modifier
+                                .width(2.5.dp)
+                                .height(h.dp)
+                                .clip(RoundedCornerShape(1.5.dp))
+                                .background(accent)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Concentric HUD Sonar Listening Halo drawn behind [ParticleAvatar3D] to give unmistakable
+ * JARVIS-like visual feedback during wake-word detection and active microphone capture.
+ */
+@Composable
+private fun WakeListeningSonarRings(
+    isStandbyWake: Boolean,
+    isActiveListening: Boolean,
+    isWakeTriggered: Boolean,
+    micVolume: Float,
+    disableAnimations: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (!isStandbyWake && !isActiveListening) return
+
+    val phase = if (!disableAnimations) {
+        val transition = rememberInfiniteTransition(label = "wake_sonar_rings")
+        val value by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = if (isActiveListening) 1500 else 3200,
+                    easing = LinearEasing
+                ),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "sonar_ring_phase"
+        )
+        value
+    } else {
+        0.35f
+    }
+
+    val ringColor = if (isWakeTriggered) ElectricEmerald else ElectricCyan
+    val volBoost = micVolume.coerceIn(0f, 1f)
+
+    Canvas(modifier = modifier) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val maxRadius = size.minDimension * 0.485f
+
+        if (isActiveListening) {
+            val p1 = phase
+            val p2 = (phase + 0.5f) % 1f
+            listOf(p1, p2).forEach { p ->
+                val radius = maxRadius * (0.68f + p * (0.32f + volBoost * 0.06f))
+                val alpha = ((1f - p) * (0.45f + volBoost * 0.35f)).coerceIn(0.03f, 0.8f)
+                drawCircle(
+                    color = ringColor.copy(alpha = alpha),
+                    radius = radius,
+                    center = center,
+                    style = Stroke(width = (1.4f + volBoost * 1.4f).dp.toPx())
+                )
+            }
+        } else if (isStandbyWake) {
+            val breathe = 0.5f + 0.5f * kotlin.math.sin(phase * 2f * Math.PI).toFloat()
+            drawCircle(
+                color = ElectricCyan.copy(alpha = (0.12f + breathe * 0.12f + volBoost * 0.25f).coerceIn(0.08f, 0.55f)),
+                radius = maxRadius * 0.86f,
+                center = center,
+                style = Stroke(width = 1.dp.toPx())
+            )
+        }
     }
 }

@@ -74,6 +74,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -82,7 +84,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.ArcBrandLogo
+import com.example.ui.AssistantStatus
+import com.example.ui.components.ParticleAvatar3D
 import com.example.ui.theme.CarbonBlack
 import com.example.ui.theme.CobaltTech
 import com.example.ui.theme.DarkTitanium
@@ -104,14 +107,14 @@ import kotlin.random.Random
 /**
  * Futuristic ARC Tech-HUD Onboarding Screen:
  * - Background ([OnboardingHudBackdrop]): DeepSpace-to-CarbonBlack gradient with subtle radial
- *   energy blooms, faint 44.dp HUD grid lines, and gentle drifting cyan/blue micro-particles.
- * - Top Brand Emblem ([OnboardingCoreHeader]): Sharp geometric circuit-"A" logo ([ArcBrandLogo])
- *   framed in a multi-layer frosted glassmorphism badge with soft outer cyan/blue glow and
- *   twinkling shimmer particles matching the Voice HUD avatar palette (replaces orange target).
+ *   energy blooms, faint 44.dp HUD blueprint grid lines, and drifting cyan/blue micro-particles.
+ * - Top Core Emblem ([OnboardingCoreHeader]): Mini volumetric cyan/blue particle orb core
+ *   ([ParticleAvatar3D]) framed inside a circular frosted glassmorphism ring with behind-ring
+ *   Gaussian blur, soft outer diffusion glow, and avatar-style particle/crosshair shimmers.
  * - Typography Hierarchy: Wide letter-spaced telemetry subtitle -> Bold heading with ElectricCyan
  *   text-shadow glow -> Muted description with breathable spacing above and below.
- * - Input Field: Unified translucent glassmorphism card with 22.dp smooth corners, glowing thin
- *   cyan border (brightening on focus), and an accented glowing Person icon badge.
+ * - Input Field: Unified translucent glassmorphism card with 22.dp smooth corners, behind-card blur,
+ *   thin glowing cyan border (brightening on focus), and an accented glowing Person icon badge.
  * - CTA Button ([OnboardingGlowButton]): ElectricCyan -> HologramBlue -> CobaltTech gradient pill
  *   with matching 22.dp corners and amplified outer/border glow on hover and press.
  */
@@ -164,11 +167,10 @@ fun OnboardingScreen(
                     vertical = if (isCompactHeight) 18.dp else 32.dp
                 )
         ) {
-            // Top Icon Widget: Frosted Glassmorphism Frame + Outer Glow + Shimmer Particles + Geometric 'A'
+            // Top Icon Widget: Frosted Glassmorphism Ring + Outer Glow + Shimmers + Mini Particle Orb Core
             OnboardingCoreHeader(
                 outerSize = if (isCompactHeight) 128.dp else 156.dp,
-                badgeSize = if (isCompactHeight) 104.dp else 124.dp,
-                logoSize = if (isCompactHeight) 84.dp else 100.dp
+                badgeSize = if (isCompactHeight) 104.dp else 124.dp
             )
 
             Spacer(modifier = Modifier.height(if (isCompactHeight) 20.dp else 36.dp))
@@ -405,24 +407,25 @@ private data class HeaderSparkle(
 )
 
 /**
- * Top Futuristic ARC Logo Header Widget:
- * - Retains the sharp geometric circuit-"A" [ArcBrandLogo] inside its cyan/blue glass frame.
- * - Softens the outer radial glow into a multi-stop atmospheric halo and adds avatar-style
- *   drifting micro-particles + subtle "+" crosshair shimmers around the glass frame.
+ * Top Futuristic ARC Core Header Widget:
+ * - Embeds a miniature cyan/blue volumetric [ParticleAvatar3D] orb inside a circular frosted
+ *   glassmorphism ring (behind-ring Gaussian blur on Android 12+, translucent gradient glass fill,
+ *   top specular highlight, and thin glowing cyan-to-cobalt border).
+ * - Adds a soft diffused outer atmospheric halo and 16 avatar-style drifting micro-particles +
+ *   subtle "+" crosshair shimmers orbiting around the glass ring.
  */
 @Composable
 private fun OnboardingCoreHeader(
     outerSize: Dp = 156.dp,
-    badgeSize: Dp = 124.dp,
-    logoSize: Dp = 100.dp
+    badgeSize: Dp = 124.dp
 ) {
-    val cardShape = RoundedCornerShape(28.dp)
+    val ringShape = CircleShape
     val sparkles = remember {
         val rng = Random(4242)
         List(16) { idx ->
             HeaderSparkle(
                 angleRad = (idx.toFloat() / 16f) * 2f * PI.toFloat() + (rng.nextFloat() - 0.5f) * 0.22f,
-                radiusFraction = 0.415f + rng.nextFloat() * 0.085f,
+                radiusFraction = 0.42f + rng.nextFloat() * 0.08f,
                 phaseOffset = rng.nextFloat() * 2f * PI.toFloat(),
                 sizeDp = 1.2f + rng.nextFloat() * 1.4f,
                 isCrosshair = idx % 4 == 0,
@@ -509,37 +512,68 @@ private fun OnboardingCoreHeader(
             }
         }
 
-        // Frosted glassmorphism rounded-square badge framing the sharp geometric circuit-"A"
+        // Blurred luminous glass-morphism backdrop ring (Android 12+ Gaussian blur)
+        Box(
+            modifier = Modifier
+                .size(badgeSize + 6.dp)
+                .then(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Modifier.blur(12.dp) else Modifier)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            ElectricCyan.copy(alpha = 0.22f * glowPulse),
+                            HologramBlue.copy(alpha = 0.12f),
+                            Color.Transparent
+                        )
+                    ),
+                    shape = ringShape
+                )
+        )
+
+        // Semi-transparent frosted glass-morphism ring + thin glowing cyan/blue border
         Box(
             modifier = Modifier
                 .size(badgeSize)
-                .clip(cardShape)
+                .clip(ringShape)
                 .background(
-                    Brush.linearGradient(
+                    Brush.radialGradient(
                         colors = listOf(
-                            DarkTitanium.copy(alpha = 0.76f),
+                            DarkTitanium.copy(alpha = 0.72f),
                             GlassBackground
                         )
                     )
                 )
+                .drawBehind {
+                    // Subtle glass-ring top specular highlight
+                    drawCircle(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.09f),
+                                Color.Transparent
+                            ),
+                            startY = 0f,
+                            endY = size.height * 0.55f
+                        )
+                    )
+                }
                 .border(
-                    width = 1.25.dp,
+                    width = 1.35.dp,
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            ElectricCyan.copy(alpha = 0.78f),
-                            HologramBlue.copy(alpha = 0.28f),
-                            ElectricCyan.copy(alpha = 0.65f)
+                            ElectricCyan.copy(alpha = 0.82f),
+                            HologramBlue.copy(alpha = 0.34f),
+                            CobaltTech.copy(alpha = 0.55f),
+                            ElectricCyan.copy(alpha = 0.75f)
                         )
                     ),
-                    shape = cardShape
+                    shape = ringShape
                 )
-                .testTag("onboarding_arc_logo"),
+                .semantics { contentDescription = "ARC AI particle orb core" }
+                .testTag("onboarding_particle_core"),
             contentAlignment = Alignment.Center
         ) {
-            ArcBrandLogo(
-                size = logoSize,
-                animatePulse = true,
-                showAmbientGlow = true
+            ParticleAvatar3D(
+                status = AssistantStatus.IDLE,
+                modifier = Modifier.fillMaxSize()
             )
         }
     }

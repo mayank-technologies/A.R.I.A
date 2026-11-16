@@ -33,7 +33,8 @@ class OnboardingScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("onboarding_arc_logo").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("onboarding_particle_core").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("onboarding_arc_logo").assertDoesNotExist()
         composeTestRule.onNodeWithText("ARC SYSTEM INITIALIZATION").assertIsDisplayed()
         composeTestRule.onNodeWithText("What should I call you?").assertIsDisplayed()
         composeTestRule.onNodeWithTag("onboarding_name_input").assertIsDisplayed()

@@ -40,80 +40,33 @@ import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.HologramBlue
 
 /**
- * Animated Pulse & Sound Wave Visual Indicator shown when ARIA is actively listening for voice input.
+ * Animated Pulse & Sound Wave Visual Indicator shown when ARC is actively listening or triggered by Wake Word.
  */
 @Composable
 fun ListeningPulseIndicator(
     isListening: Boolean,
     modifier: Modifier = Modifier,
+    micVolume: Float = 0f,
+    label: String = "LISTENING",
+    accentColor: Color = CyberCyan,
     disableAnimations: Boolean = false
 ) {
     if (!isListening) return
 
-    val ripple1Scale: Float
-    val ripple1Alpha: Float
-    val ripple2Scale: Float
-    val ripple2Alpha: Float
     val bar1Height: Float
     val bar2Height: Float
     val bar3Height: Float
     val bar4Height: Float
+    val clampedVol = micVolume.coerceIn(0f, 1f)
 
     if (!disableAnimations) {
         val infiniteTransition = rememberInfiniteTransition(label = "ListeningPulseTransition")
 
-        // Animated ripple expanding circle 1
-        val r1s by infiniteTransition.animateFloat(
-            initialValue = 0.8f,
-            targetValue = 2.2f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "Ripple1Scale"
-        )
-        ripple1Scale = r1s
-
-        val r1a by infiniteTransition.animateFloat(
-            initialValue = 0.8f,
-            targetValue = 0.0f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1800, easing = FastOutLinearInEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "Ripple1Alpha"
-        )
-        ripple1Alpha = r1a
-
-        // Animated ripple expanding circle 2 (offset)
-        val r2s by infiniteTransition.animateFloat(
-            initialValue = 0.5f,
-            targetValue = 1.7f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1800, delayMillis = 600, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "Ripple2Scale"
-        )
-        ripple2Scale = r2s
-
-        val r2a by infiniteTransition.animateFloat(
-            initialValue = 0.7f,
-            targetValue = 0.0f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1800, delayMillis = 600, easing = FastOutLinearInEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "Ripple2Alpha"
-        )
-        ripple2Alpha = r2a
-
-        // Sound wave bar heights
         val b1 by infiniteTransition.animateFloat(
             initialValue = 6f,
-            targetValue = 28f,
+            targetValue = 20f + clampedVol * 12f,
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+                animation = tween(durationMillis = 280, easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse
             ),
             label = "Bar1"
@@ -121,10 +74,10 @@ fun ListeningPulseIndicator(
         bar1Height = b1
 
         val b2 by infiniteTransition.animateFloat(
-            initialValue = 12f,
-            targetValue = 36f,
+            initialValue = 10f,
+            targetValue = 26f + clampedVol * 14f,
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+                animation = tween(durationMillis = 390, easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse
             ),
             label = "Bar2"
@@ -133,9 +86,9 @@ fun ListeningPulseIndicator(
 
         val b3 by infiniteTransition.animateFloat(
             initialValue = 8f,
-            targetValue = 32f,
+            targetValue = 24f + clampedVol * 14f,
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+                animation = tween(durationMillis = 240, easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse
             ),
             label = "Bar3"
@@ -143,25 +96,20 @@ fun ListeningPulseIndicator(
         bar3Height = b3
 
         val b4 by infiniteTransition.animateFloat(
-            initialValue = 14f,
-            targetValue = 24f,
+            initialValue = 11f,
+            targetValue = 19f + clampedVol * 12f,
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 380, easing = FastOutSlowInEasing),
+                animation = tween(durationMillis = 350, easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse
             ),
             label = "Bar4"
         )
         bar4Height = b4
     } else {
-        // Static values in battery saver mode
-        ripple1Scale = 1.0f
-        ripple1Alpha = 0.3f
-        ripple2Scale = 1.3f
-        ripple2Alpha = 0.15f
-        bar1Height = 16f
-        bar2Height = 24f
-        bar3Height = 18f
-        bar4Height = 20f
+        bar1Height = 14f + clampedVol * 8f
+        bar2Height = 22f + clampedVol * 10f
+        bar3Height = 16f + clampedVol * 8f
+        bar4Height = 18f + clampedVol * 8f
     }
 
     Box(
@@ -169,12 +117,11 @@ fun ListeningPulseIndicator(
             .testTag("listening_pulse_indicator"),
         contentAlignment = Alignment.Center
     ) {
-        // Sound Wave Bar Row pill (pure cyan/blue palette)
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(16.dp))
-                .background(Color.Black.copy(alpha = 0.55f))
-                .border(1.dp, CyberCyan.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                .background(Color.Black.copy(alpha = 0.62f))
+                .border(1.2.dp, accentColor.copy(alpha = 0.65f), RoundedCornerShape(16.dp))
                 .padding(horizontal = 12.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
@@ -182,7 +129,7 @@ fun ListeningPulseIndicator(
             Box(
                 modifier = Modifier
                     .width(4.dp)
-                    .height(bar1Height.dp)
+                    .height(bar1Height.coerceAtMost(32f).dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(HologramBlue)
             )
@@ -190,15 +137,15 @@ fun ListeningPulseIndicator(
             Box(
                 modifier = Modifier
                     .width(4.dp)
-                    .height(bar2Height.dp)
+                    .height(bar2Height.coerceAtMost(34f).dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(CyberCyan)
+                    .background(accentColor)
             )
             Spacer(modifier = Modifier.width(4.dp))
             Box(
                 modifier = Modifier
                     .width(4.dp)
-                    .height(bar3Height.dp)
+                    .height(bar3Height.coerceAtMost(34f).dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(HologramBlue)
             )
@@ -206,17 +153,17 @@ fun ListeningPulseIndicator(
             Box(
                 modifier = Modifier
                     .width(4.dp)
-                    .height(bar4Height.dp)
+                    .height(bar4Height.coerceAtMost(32f).dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(CyberCyan)
+                    .background(accentColor)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "LISTENING",
-                color = CyberCyan,
+                text = label,
+                color = accentColor,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
+                letterSpacing = 1.1.sp
             )
         }
     }
