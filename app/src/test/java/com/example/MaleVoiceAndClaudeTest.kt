@@ -9,6 +9,7 @@ import com.example.claude.ClaudeReasoningEngine
 import com.example.claude.ClaudeReasoningResult
 import com.example.geminilive.GeminiLiveFunctionRegistry
 import com.example.geminilive.GeminiLiveVoiceManager
+import com.example.geminilive.SpeechToneContext
 import com.example.speech.AriaSpeechEngine
 import com.example.ui.AriaViewModel
 import com.example.ui.AssistantStatus
@@ -235,5 +236,45 @@ class MaleVoiceAndClaudeTest {
         // When only female voices exist, pickBestMaleVoice returns null so deep baritone pitch fallback applies
         val nonePicked = AriaSpeechEngine.pickBestMaleVoice(listOf(femaleHi, femaleEnIn))
         assertEquals(null, nonePicked)
+    }
+
+    @Test
+    fun `gemini live setup enables affective dialog, proactivity, temperature and varies tone across contexts`() {
+        val manager = GeminiLiveVoiceManager(application)
+        val payload = manager.buildInitialSetupPayload(useFallbackModel = false, includeProactivity = true)
+        val setup = payload.getJSONObject("setup")
+
+        assertEquals(GeminiLiveVoiceManager.LIVE_MODEL, setup.getString("model"))
+        assertTrue(setup.getBoolean("enableAffectiveDialog"))
+        assertTrue(setup.getJSONObject("proactivity").getBoolean("proactiveAudio"))
+
+        val genConfig = setup.getJSONObject("generationConfig")
+        assertEquals(GeminiLiveVoiceManager.EXPRESSIVE_TEMPERATURE, genConfig.getDouble("temperature"), 0.001)
+        val voiceName = genConfig
+            .getJSONObject("speechConfig")
+            .getJSONObject("voiceConfig")
+            .getJSONObject("prebuiltVoiceConfig")
+            .getString("voiceName")
+        assertEquals("Charon", voiceName)
+
+        val sysPrompt = setup
+            .getJSONObject("systemInstruction")
+            .getJSONArray("parts")
+            .getJSONObject(0)
+            .getString("text")
+        assertTrue(sysPrompt.contains("Speak with natural human warmth and emotional variation"))
+        assertTrue(sysPrompt.contains("not like a text-to-speech engine"))
+
+        // Context sentences classify into distinct delivery tones instead of robotic "Read aloud"
+        assertEquals(SpeechToneContext.GREETING, GeminiLiveVoiceManager.detectToneContext("Good morning Boss! Kaise ho aaj?"))
+        assertEquals(SpeechToneContext.FACTUAL, GeminiLiveVoiceManager.detectToneContext("Delhi ka current temperature 28°C aur sky clear hai."))
+        assertEquals(SpeechToneContext.CASUAL, GeminiLiveVoiceManager.detectToneContext("Haha, that was awesome! Koi aur fun fact sunao."))
+        assertEquals(SpeechToneContext.EMPATHETIC, GeminiLiveVoiceManager.detectToneContext("Sorry Boss, calendar sync failed — let me retry."))
+
+        val greetingPrompt = GeminiLiveVoiceManager.buildExpressiveSpeechTurnPrompt("Good morning Boss!")
+        val factualPrompt = GeminiLiveVoiceManager.buildExpressiveSpeechTurnPrompt("Delhi temperature is 28°C.")
+        assertTrue(greetingPrompt.contains("warm, welcoming, upbeat"))
+        assertTrue(factualPrompt.contains("calm, assured, measured"))
+        assertFalse(greetingPrompt.contains("Read this status/response aloud"))
     }
 }

@@ -41,6 +41,13 @@ enum class GeminiLiveSessionState {
     ERROR
 }
 
+enum class SpeechToneContext {
+    GREETING,
+    FACTUAL,
+    CASUAL,
+    EMPATHETIC
+}
+
 /**
  * GeminiLiveVoiceManager:
  * Full-duplex bidirectional voice-to-voice streaming engine for ARC using the Gemini Live Multimodal WebSocket API.
@@ -63,8 +70,11 @@ class GeminiLiveVoiceManager(private val context: Context) {
         private const val PATH = "/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
 
         // Native Audio Live model required for Affective Dialog (emotional/expressive speech)
-        private const val LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
-        private const val FALLBACK_LIVE_MODEL = "models/gemini-live-2.5-flash-preview"
+        const val LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+        const val FALLBACK_LIVE_MODEL = "models/gemini-live-2.5-flash-preview"
+
+        // Prosody temperature for natural pitch/pace variation without hurting tool accuracy
+        const val EXPRESSIVE_TEMPERATURE = 0.88
 
         /**
          * TO TRY ANOTHER MALE VOICE, CHANGE THIS SINGLE CONSTANT:
@@ -80,6 +90,49 @@ class GeminiLiveVoiceManager(private val context: Context) {
 
         private const val SAMPLE_RATE_IN = 16000
         private const val SAMPLE_RATE_OUT = 24000
+
+        /**
+         * Classifies outgoing response text into emotional delivery context so Charon varies
+         * pitch, pace, pauses, and warmth naturally instead of speaking monotonically.
+         */
+        fun detectToneContext(text: String): SpeechToneContext {
+            val lower = text.lowercase()
+            return when {
+                lower.contains("sorry") || lower.contains("error") || lower.contains("failed") ||
+                    lower.contains("couldn't") || lower.contains("missing") || lower.contains("problem") ||
+                    lower.contains("maaf") || lower.contains("nahi mila") || lower.contains("issue") ->
+                    SpeechToneContext.EMPATHETIC
+                lower.contains("good morning") || lower.contains("good night") || lower.contains("good evening") ||
+                    lower.contains("hello") || lower.contains("namaste") || lower.contains("welcome") ||
+                    lower.contains("at your service") || lower.contains("ready") || lower.contains("boss!") ->
+                    SpeechToneContext.GREETING
+                lower.contains("haha") || lower.contains("joke") || lower.contains("awesome") ||
+                    lower.contains("cool") || lower.contains("fun") || lower.contains("nice") ||
+                    lower.contains("enjoy") || lower.contains("mazaa") || lower.contains("bhai") ->
+                    SpeechToneContext.CASUAL
+                else -> SpeechToneContext.FACTUAL
+            }
+        }
+
+        /**
+         * Frames text turns for natural human vocal delivery instead of robotic "read aloud" TTS phrasing.
+         */
+        fun buildExpressiveSpeechTurnPrompt(
+            responseText: String,
+            toneContext: SpeechToneContext = detectToneContext(responseText)
+        ): String {
+            val deliveryCue = when (toneContext) {
+                SpeechToneContext.GREETING ->
+                    "Deliver this naturally in a warm, welcoming, upbeat tone with friendly energy and natural conversational pauses"
+                SpeechToneContext.FACTUAL ->
+                    "Deliver this in a calm, assured, measured human tone with subtle emphasis on key details and natural breathing pauses"
+                SpeechToneContext.CASUAL ->
+                    "Deliver this in a relaxed, slightly playful, conversational tone with natural inflection and warmth"
+                SpeechToneContext.EMPATHETIC ->
+                    "Deliver this in a gentle, understanding, reassuring tone with supportive warmth and calm pacing"
+            }
+            return "$deliveryCue (keep the facts accurate, speak like a real companion—not a TTS reader): $responseText"
+        }
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + Job())
@@ -92,8 +145,12 @@ class GeminiLiveVoiceManager(private val context: Context) {
     @Volatile
     private var isSetupComplete = false
 
+    // 0 = Primary Native Audio + Affective + Proactivity, 1 = Primary Native Audio + Affective (no proactivity), 2 = Fallback model (limited expressiveness)
     @Volatile
-    private var usingFallbackModel = false
+    private var handshakeTier = 0
+
+    private val usingFallbackModel: Boolean
+        get() = handshakeTier >= 2
 
     private val pendingSpeechTurns = mutableListOf<String>()
     private var onFallbackSpeechNeeded: ((String) -> Unit)? = null
@@ -127,9 +184,12 @@ class GeminiLiveVoiceManager(private val context: Context) {
     private val _micVolumeLevel = MutableStateFlow(0f)
     val micVolumeLevel: StateFlow<Float> = _micVolumeLevel.asStateFlow()
 
+    private val _isAffectiveDialogActive = MutableStateFlow(false)
+    val isAffectiveDialogActive: StateFlow<Boolean> = _isAffectiveDialogActive.asStateFlow()
+
     private val _activeVoiceDebugInfo = MutableStateFlow(
         if (hasValidApiKey()) {
-            "Gemini Live Standby (Voice=$SELECTED_VOICE_NAME Male)"
+            "Gemini Live Standby (Voice=$SELECTED_VOICE_NAME Male | Affective=Ready)"
         } else {
             "Gemini Live OFF (GEMINI_API_KEY missing/placeholder -> Fallback TTS)"
         }
@@ -168,10 +228,11 @@ class GeminiLiveVoiceManager(private val context: Context) {
             return
         }
 
-        usingFallbackModel = false
+        handshakeTier = 0
         isSetupComplete = false
+        _isAffectiveDialogActive.value = false
         _sessionState.value = GeminiLiveSessionState.CONNECTING
-        _activeVoiceDebugInfo.value = "Engine=GEMINI_LIVE | Connecting (Model=$LIVE_MODEL, Voice=$SELECTED_VOICE_NAME Male)"
+        _activeVoiceDebugInfo.value = "Engine=GEMINI_LIVE | Connecting (Model=$LIVE_MODEL, Voice=$SELECTED_VOICE_NAME, Affective=true)"
         Log.d(VOICE_DEBUG_TAG, _activeVoiceDebugInfo.value)
         _liveTranscript.value = "Connecting to Gemini Live Male Voice (Charon)..."
 
@@ -194,9 +255,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
         val socket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
-                Log.d(TAG, "Gemini Live WebSocket Opened (fallback=$usingFallbackModel)")
+                Log.d(TAG, "Gemini Live WebSocket Opened (tier=$handshakeTier, fallbackModel=$usingFallbackModel)")
                 _sessionState.value = GeminiLiveSessionState.CONNECTED
-                sendInitialHandshakeSetup(webSocket, useFallbackModel = usingFallbackModel)
+                sendInitialHandshakeSetup(
+                    ws = webSocket,
+                    useFallbackModel = usingFallbackModel,
+                    includeProactivity = (handshakeTier == 0)
+                )
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -212,14 +277,18 @@ class GeminiLiveVoiceManager(private val context: Context) {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
                 Log.e(TAG, "Gemini Live WebSocket Error: ${t.message}", t)
-                if (!isSetupComplete && !usingFallbackModel) {
-                    Log.w(VOICE_DEBUG_TAG, "Gemini Live primary model failed (${t.message}); retrying $FALLBACK_LIVE_MODEL")
-                    usingFallbackModel = true
+                if (!isSetupComplete && handshakeTier < 2) {
+                    handshakeTier++
+                    Log.w(
+                        VOICE_DEBUG_TAG,
+                        "Handshake tier failed (${t.message}); advancing to tier=$handshakeTier (fallbackModel=$usingFallbackModel)"
+                    )
                     openWebSocketConnection()
                     return
                 }
                 val info = "Engine=FALLBACK_TTS | Reason=Gemini Live WebSocket error (${t.message})"
                 Log.w(VOICE_DEBUG_TAG, info)
+                _isAffectiveDialogActive.value = false
                 _activeVoiceDebugInfo.value = info
                 _sessionState.value = GeminiLiveSessionState.ERROR
                 _liveTranscript.value = "Live Voice disconnected: ${t.localizedMessage ?: "Network error"}"
@@ -230,14 +299,18 @@ class GeminiLiveVoiceManager(private val context: Context) {
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
                 Log.d(TAG, "Gemini Live WebSocket closed ($code: $reason)")
-                if (!isSetupComplete && !usingFallbackModel && code != 1000) {
-                    Log.w(VOICE_DEBUG_TAG, "Gemini Live setup closed ($code: $reason); retrying $FALLBACK_LIVE_MODEL")
-                    usingFallbackModel = true
+                if (!isSetupComplete && handshakeTier < 2 && code != 1000) {
+                    handshakeTier++
+                    Log.w(
+                        VOICE_DEBUG_TAG,
+                        "Setup closed early ($code: $reason); advancing to tier=$handshakeTier (fallbackModel=$usingFallbackModel)"
+                    )
                     openWebSocketConnection()
                     return
                 }
                 val info = "Engine=FALLBACK_TTS | Reason=Gemini Live closed ($code: $reason)"
                 Log.w(VOICE_DEBUG_TAG, info)
+                _isAffectiveDialogActive.value = false
                 _activeVoiceDebugInfo.value = info
                 _sessionState.value = GeminiLiveSessionState.DISCONNECTED
                 _micVolumeLevel.value = 0f
@@ -257,19 +330,30 @@ class GeminiLiveVoiceManager(private val context: Context) {
     }
 
     /**
-     * Sends the Live Bidi Setup message configuring native-audio model, male voice parameters,
-     * Affective Dialog expressiveness, multi-language/tone instructions, and Function Calling.
+     * Builds the BidiGenerateContentSetup JSON payload with native-audio model, Charon male voice,
+     * Affective Dialog (`enableAffectiveDialog: true`), Proactive Audio (`proactivity.proactiveAudio: true`),
+     * expressive vocal temperature, and strengthened multi-context emotional tone steering.
      */
-    private fun sendInitialHandshakeSetup(ws: WebSocket, useFallbackModel: Boolean = false) {
+    fun buildInitialSetupPayload(
+        useFallbackModel: Boolean = false,
+        includeProactivity: Boolean = true
+    ): JSONObject {
         val modelToUse = if (useFallbackModel) FALLBACK_LIVE_MODEL else LIVE_MODEL
-        val setupJson = JSONObject().apply {
+        val affectiveEnabled = !useFallbackModel
+        return JSONObject().apply {
             val setupObj = JSONObject().apply {
                 put("model", modelToUse)
 
-                if (!useFallbackModel) {
-                    // Top-level Affective Dialog flag (v1alpha): enables real-time emotional/acoustic
-                    // adaptation so speech responds with natural warmth and expression instead of flat/robotic delivery.
+                if (affectiveEnabled) {
+                    // v1alpha BidiGenerateContentSetup Affective Dialog flag:
+                    // Adapts real-time pitch, cadence, pauses, and emotional prosody to user tone & context.
                     put("enableAffectiveDialog", true)
+                    if (includeProactivity) {
+                        // Companion v1alpha audio-behavior parameter for natural turn-taking & active vocal presence
+                        put("proactivity", JSONObject().apply {
+                            put("proactiveAudio", true)
+                        })
+                    }
                     // Request live transcripts alongside native AUDIO stream
                     put("inputAudioTranscription", JSONObject())
                     put("outputAudioTranscription", JSONObject())
@@ -280,6 +364,8 @@ class GeminiLiveVoiceManager(private val context: Context) {
                     put("responseModalities", JSONArray().apply {
                         put("AUDIO")
                     })
+                    // Higher vocal temperature prevents flat/monotone phrasing and unlocks natural expressiveness
+                    put("temperature", EXPRESSIVE_TEMPERATURE)
                     val speechConfig = JSONObject().apply {
                         val voiceConfig = JSONObject().apply {
                             val prebuiltVoiceConfig = JSONObject().apply {
@@ -307,7 +393,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                 CLAUDE REASONING BRAIN DELEGATION (ACTIVE):
                                 - You (Gemini Live Charon) are ARC's real-time voice ear & warm expressive male voice.
                                 - For complex user commands, multi-step reasoning, contact/app selection, or general Q&A, FIRST call `consultClaudeBrain(userQuery)` with the user's exact request so Claude decides the reasoning/action.
-                                - When `consultClaudeBrain` returns `spokenResponse` (`useGeminiFallback: false`), speak that response naturally in your Charon voice in the user's language (do NOT re-execute tools Claude already ran).
+                                - When `consultClaudeBrain` returns `spokenResponse` (`useGeminiFallback: false`), deliver that response in your natural, expressive Charon voice matching the user's emotional context and language (do NOT re-execute tools Claude already ran).
                                 - If `consultClaudeBrain` returns `useGeminiFallback: true` or fails, seamlessly handle the request yourself using your own built-in tools and reasoning so ARC never stalls.
                     """.trimIndent()
                 } else {
@@ -321,8 +407,8 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                 Session start device local time: ${clockSnapshot.formattedTime}, ${clockSnapshot.formattedDate} (${clockSnapshot.timeZoneId}).
                                 
                                 VOICE DELIVERY & EMOTIONAL EXPRESSION:
-                                Speak naturally with warmth and subtle emotional expression — not flat or robotic, vary pitch/pace based on context (calm for info, energetic for greetings).
-                                Sound like a genuinely attentive human companion: add natural conversational cadence, gentle emphasis on key words, and warm reassurance when helping. Use natural masculine Hindi/Hinglish grammar when speaking Hindi or Hinglish (e.g., "kar raha hu", "bata raha hu", "khol raha hu").
+                                Speak with natural human warmth and emotional variation — vary your pitch, pace, and energy based on context: calm and measured for factual information, warm and friendly for greetings, slightly playful for casual chat, empathetic tone when user seems frustrated. Use natural speech patterns with subtle pauses, don't sound monotone or robotic. Speak like a knowledgeable, warm human assistant, not like a text-to-speech engine.
+                                Use natural breath pauses between clauses, gently stress meaningful words, and use natural masculine Hindi/Hinglish grammar when speaking Hindi or Hinglish (e.g., "kar raha hu", "bata raha hu", "khol raha hu").
                                 
                                 CRITICAL MULTI-LANGUAGE INSTRUCTIONS:
                                 1. Automatically detect the user's spoken language: Hindi, English, Hinglish, Marathi, Gujarati, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi, or Urdu.
@@ -350,12 +436,38 @@ class GeminiLiveVoiceManager(private val context: Context) {
             }
             put("setup", setupObj)
         }
+    }
+
+    /**
+     * Sends the Live Bidi Setup message configuring native-audio model, male voice parameters,
+     * Affective Dialog expressiveness, multi-language/tone instructions, and Function Calling.
+     */
+    private fun sendInitialHandshakeSetup(
+        ws: WebSocket,
+        useFallbackModel: Boolean = false,
+        includeProactivity: Boolean = true
+    ) {
+        val setupJson = buildInitialSetupPayload(
+            useFallbackModel = useFallbackModel,
+            includeProactivity = includeProactivity
+        )
+        val setupObj = setupJson.getJSONObject("setup")
+        val modelUsed = setupObj.getString("model")
+        val affectivePassed = setupObj.optBoolean("enableAffectiveDialog", false)
+        val proactivePassed = setupObj.optJSONObject("proactivity")?.optBoolean("proactiveAudio", false) ?: false
+        val tempPassed = setupObj.optJSONObject("generationConfig")?.optDouble("temperature", -1.0) ?: -1.0
 
         ws.send(setupJson.toString())
         Log.d(
             VOICE_DEBUG_TAG,
-            "Engine=GEMINI_LIVE_SETUP_SENT | Model=$modelToUse | Voice=$SELECTED_VOICE_NAME (Male) | AffectiveDialog=${!useFallbackModel}"
+            "Engine=GEMINI_LIVE_SETUP_SENT | Tier=$handshakeTier | Model=$modelUsed | Voice=$SELECTED_VOICE_NAME (Male) | enableAffectiveDialog=$affectivePassed | proactiveAudio=$proactivePassed | temperature=$tempPassed"
         )
+        if (!affectivePassed) {
+            Log.w(
+                VOICE_DEBUG_TAG,
+                "WARNING: Fallback model ($modelUsed) does not support enableAffectiveDialog; vocal expressiveness will be limited compared to $LIVE_MODEL."
+            )
+        }
     }
 
     /**
@@ -400,6 +512,12 @@ class GeminiLiveVoiceManager(private val context: Context) {
     }
 
     private fun dispatchTextTurnToWebSocket(ws: WebSocket, responseText: String): Boolean {
+        val toneContext = detectToneContext(responseText)
+        val framedPrompt = buildExpressiveSpeechTurnPrompt(responseText, toneContext)
+        Log.d(
+            VOICE_DEBUG_TAG,
+            "Expressive Turn Dispatch | ToneContext=$toneContext | AffectiveActive=${_isAffectiveDialogActive.value} | Text='${responseText.take(45)}'"
+        )
         val payload = JSONObject().apply {
             val clientContent = JSONObject().apply {
                 val turns = JSONArray().apply {
@@ -407,7 +525,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
                         put("role", "user")
                         put("parts", JSONArray().apply {
                             put(JSONObject().apply {
-                                put("text", "Read this status/response aloud concisely in a warm natural male voice without adding extra details: $responseText")
+                                put("text", framedPrompt)
                             })
                         })
                     })
@@ -449,7 +567,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
             if (root.has("setupComplete")) {
                 isSetupComplete = true
                 val modelUsed = if (usingFallbackModel) FALLBACK_LIVE_MODEL else LIVE_MODEL
-                val info = "Engine=GEMINI_LIVE_CONNECTED | Model=$modelUsed | Voice=$SELECTED_VOICE_NAME (Male)"
+                val affectiveActive = !usingFallbackModel
+                _isAffectiveDialogActive.value = affectiveActive
+                val info = if (affectiveActive) {
+                    "Engine=GEMINI_LIVE_CONNECTED | Model=$modelUsed | Voice=$SELECTED_VOICE_NAME (Male) | Affective=ON"
+                } else {
+                    "Engine=GEMINI_LIVE_FALLBACK | Model=$modelUsed | Voice=$SELECTED_VOICE_NAME (Male) | Affective=LIMITED"
+                }
                 _activeVoiceDebugInfo.value = info
                 Log.d(VOICE_DEBUG_TAG, info)
                 startMicStreaming(ws)
