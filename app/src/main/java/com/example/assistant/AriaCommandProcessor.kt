@@ -357,7 +357,12 @@ class AriaCommandProcessor(
             queryLower.contains("subah ki update") || queryLower.contains("daily report") ||
             queryLower.contains("aaj ki report") || queryLower.contains("morning summary")
         ) {
-            val briefingText = generateBriefingSummary("")
+            val manualMorningOverride = if (queryLower.contains("good morning") || queryLower.contains("morning")) {
+                "Good morning"
+            } else {
+                null
+            }
+            val briefingText = generateBriefingSummary(displayName, overrideGreeting = manualMorningOverride)
             return@withContext AriaCommandResult.TextResponse(briefingText, "BRIEFING")
         }
 
@@ -888,21 +893,23 @@ class AriaCommandProcessor(
      * Cohesive Auto-Greeting briefing:
      * Time-aware greeting ("Hello [Name]! Good morning/afternoon/evening/night"),
      * today's local GPS weather (or Delhi fallback), and today's tasks/reminders.
+     *
+     * @param overrideGreeting Optional manual override (e.g. "Good morning" from "Good Morning ARC" routine).
+     * When null, automatically resolves greeting from fresh live system clock & timezone.
      */
-    suspend fun generateBriefingSummary(userName: String): String = withContext(Dispatchers.IO) {
+    suspend fun generateBriefingSummary(
+        userName: String,
+        overrideGreeting: String? = null
+    ): String = withContext(Dispatchers.IO) {
         val displayName = userName.ifBlank { "Boss" }
 
-        val hour = DeviceClockHelper.getCurrentDeviceClockInfo(
+        val greetingDecision = DeviceClockHelper.evaluateTimeBasedGreeting(
             context = context,
-            logDebug = true,
-            source = "AutoBriefingGreeting"
-        ).hourOfDay
-        val timeGreeting = when (hour) {
-            in 4..11 -> "Good morning"
-            in 12..16 -> "Good afternoon"
-            in 17..20 -> "Good evening"
-            else -> "Good night"
-        }
+            source = if (overrideGreeting != null) "ManualMorningRoutine" else "AutoBriefingGreeting",
+            overrideGreeting = overrideGreeting,
+            logDebug = true
+        )
+        val timeGreeting = greetingDecision.greeting
 
         val weather = fetchWeatherSnapshot(city = null)
 

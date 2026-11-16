@@ -1,13 +1,17 @@
 package com.example.ui
 
 import android.app.Application
-import android.content.Intent
-import android.net.Uri
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.net.Uri
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.assistant.AriaCommandProcessor
 import com.example.assistant.AriaCommandResult
+import com.example.assistant.DeviceClockHelper
 import com.example.data.AriaDatabase
 import com.example.data.ReminderEntity
 import com.example.data.VoiceHistoryEntity
@@ -268,7 +272,38 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     )
     val memoryFacts: StateFlow<List<MemoryFactItem>> = _memoryFacts.asStateFlow()
 
+    private var timeChangeReceiver: BroadcastReceiver? = null
+
     init {
+        // Register timezone/time listener from ViewModel startup (even before VoiceHudScreen mounts)
+        // so early auto-greeting and Gemini Live never read a stale cached JVM TimeZone.
+        val appCtx = getApplication<Application>()
+        val tzReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_TIMEZONE_CHANGED) {
+                    DeviceClockHelper.onTimezoneChanged(intent.getStringExtra("time-zone"))
+                    DeviceClockHelper.getCurrentDeviceClockInfo(
+                        context = appCtx,
+                        logDebug = true,
+                        source = "ViewModelTimezoneChanged"
+                    )
+                }
+            }
+        }
+        try {
+            ContextCompat.registerReceiver(
+                appCtx,
+                tzReceiver,
+                IntentFilter().apply {
+                    addAction(Intent.ACTION_TIMEZONE_CHANGED)
+                    addAction(Intent.ACTION_TIME_CHANGED)
+                },
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            timeChangeReceiver = tzReceiver
+        } catch (_: Exception) {
+        }
+
         android.util.Log.d(
             AriaSpeechEngine.VOICE_DEBUG_TAG,
             "Startup Voice Audit | GeminiLiveDefault=${_isGeminiLiveMode.value} | GeminiKeyValid=${geminiLiveManager.hasValidApiKey()} | GeminiVoice=${com.example.geminilive.GeminiLiveVoiceManager.SELECTED_VOICE_NAME} | ElevenLabsVoice=${speechEngine.getActiveVoiceId()}"
@@ -512,7 +547,11 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     fun powerOffArc(customFarewell: String? = null) {
         val displayName = _userName.value.ifBlank { "Boss" }
         val farewell = customFarewell
-            ?: "Good night, $displayName! ARC standby mode me ja raha hai taaki phone battery save ho sake. Tap power button to start!"
+            ?: DeviceClockHelper.resolveStandbyFarewell(
+                context = getApplication(),
+                displayName = displayName,
+                isExplicitGoodNightCommand = false
+            )
 
         _isArcPoweredOn.value = false
         _assistantStatus.value = AssistantStatus.SLEEP
@@ -848,6 +887,13 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        timeChangeReceiver?.let { receiver ->
+            try {
+                getApplication<Application>().unregisterReceiver(receiver)
+            } catch (_: Exception) {
+            }
+        }
+        timeChangeReceiver = null
         speechEngine.destroy()
     }
 }

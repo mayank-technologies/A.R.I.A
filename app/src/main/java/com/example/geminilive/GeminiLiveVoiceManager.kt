@@ -131,7 +131,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 SpeechToneContext.EMPATHETIC ->
                     "Deliver this in a gentle, understanding, reassuring tone with supportive warmth and calm pacing"
             }
-            return "$deliveryCue (keep the facts accurate, speak like a real companion—not a TTS reader): $responseText"
+            return "$deliveryCue (keep all facts and the exact time-of-day greeting such as Good morning/afternoon/evening accurate, speak like a real companion—not a TTS reader): $responseText"
         }
     }
 
@@ -418,7 +418,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                 
                                 FUNCTION-CALLING & CALL CONFIRMATION RULES:
                                 1. Use the provided tools (consultClaudeBrain, openGoogleMapsRoute, assistRideBooking, assistShoppingSearch, openWhatsApp, openApp, openUrl, makeCall, callContact, getCurrentDateTime, controlHardware, toggleSecurityGuard, readWhatsAppNotifications, readScreenVision) whenever user expresses an action intent or asks the current time/date.
-                                2. ALWAYS call getCurrentDateTime (or consultClaudeBrain) before stating the current time or date so you never guess or give a stale/wrong time.
+                                2. ALWAYS call getCurrentDateTime (or consultClaudeBrain) before stating the current time/date OR choosing a time-of-day greeting (Good morning/afternoon/evening/night), because Session start device local time may be hours old—never guess or say "Good night" in the morning.
                                 3. NEVER execute arbitrary code. ONLY trigger the declared tools.
                                 4. When calling someone: Verbally acknowledge immediately (e.g. "Calling Mom, Boss", "Rahul ko call laga raha hu") before or during the tool call.
                                 5. If a tool fails or reports an error, state the TRUTH to the user politely. NEVER pretend an action succeeded when it failed.

@@ -57,8 +57,12 @@ class RoutineManager(
         // 1. Ensure edge glow lights up active
         AriaEdgeGlowOverlayManager.updateGlowState(AriaEdgeGlowView.GlowState.SPEAKING)
 
-        // 2. Aggregate weather + reminders + morning greeting
-        val briefingText = commandProcessor.generateBriefingSummary(userName)
+        // 2. Manual "Good Morning ARC" shares the weather + tasks briefing builder,
+        //    but passes overrideGreeting = "Good morning" so explicit morning commands never say "Good night".
+        val briefingText = commandProcessor.generateBriefingSummary(
+            userName = userName,
+            overrideGreeting = "Good morning"
+        )
 
         return RoutineResult.Success(
             routineName = "GOOD_MORNING",
@@ -69,8 +73,12 @@ class RoutineManager(
 
     private suspend fun executeGoodNightRoutine(userName: String): RoutineResult {
         val displayName = userName.ifBlank { "Boss" }
-        // 1. Short peaceful farewell
-        val farewellText = "Good night, $displayName! ARC standby mode me ja raha hai taaki phone battery save ho sake. Sound sleep lijiye!"
+        // 1. Dedicated manual "Good Night ARC" farewell (independent from automatic time-based greeting)
+        val farewellText = DeviceClockHelper.resolveStandbyFarewell(
+            context = context,
+            displayName = displayName,
+            isExplicitGoodNightCommand = true
+        )
 
         // 2. Gracefully pause background always-listening service to save battery
         try {
