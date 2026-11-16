@@ -51,21 +51,63 @@ jobs:
             exit 1
           fi
 
+      # Fix: android-actions/setup-android@v3 defaults to `packages: 'tools platform-tools'`.
+      # Google removed the legacy `tools` package, which makes cmdline-tools/16.0/bin/sdkmanager fail with exit code 1.
+      # Passing `packages: ''` skips that broken default while keeping ANDROID_HOME / PATH setup intact.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        timeout-minutes: 10
+        with:
+          packages: ''
 
-      - name: Accept Android SDK licenses
+      # Accept SDK licenses and install verified API 36.1 / 36 / build-tools 36.0.0 with --verbose logging & retry logic
+      - name: Install Android SDK packages and accept licenses
+        timeout-minutes: 10
         run: |
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "Using SDK_ROOT: $SDK_ROOT"
           mkdir -p "$SDK_ROOT/licenses"
+
+          # Pre-seed standard & preview license hashes so headless Gradle/sdkmanager never prompts interactively
           printf '\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n' > "$SDK_ROOT/licenses/android-sdk-license"
           printf '\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n' > "$SDK_ROOT/licenses/android-sdk-preview-license"
 
-          SDKMANAGER_BIN=$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 4 -type f -name sdkmanager 2>/dev/null | head -n 1 || true)
-          if [ -n "$SDKMANAGER_BIN" ] && [ -x "$SDKMANAGER_BIN" ]; then
-            yes | "$SDKMANAGER_BIN" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
-            "$SDKMANAGER_BIN" --sdk_root="$SDK_ROOT" "platform-tools" "build-tools;36.0.0" "platforms;android-36" "platforms;android-36.1" || true
+          SDKMANAGER_BIN=$(command -v sdkmanager || find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -type f -name sdkmanager 2>/dev/null | head -n 1 || true)
+          if [ -z "$SDKMANAGER_BIN" ] || [ ! -x "$SDKMANAGER_BIN" ]; then
+            echo "Error: sdkmanager binary not found under $SDK_ROOT"
+            exit 1
           fi
+          echo "Using sdkmanager: $SDKMANAGER_BIN"
+
+          # Disable pipefail locally so `yes` closing on SIGPIPE doesn't abort the step
+          set +o pipefail
+          yes | "$SDKMANAGER_BIN" --sdk_root="$SDK_ROOT" --licenses --verbose || true
+
+          # Install exact packages matching app/build.gradle.kts (compileSdk 36 minorApiLevel 1) with 3x retry
+          MAX_ATTEMPTS=3
+          ATTEMPT=1
+          SUCCESS=false
+          while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Installing Android SDK packages (--verbose)..."
+            if "$SDKMANAGER_BIN" --sdk_root="$SDK_ROOT" --verbose \
+              "platform-tools" \
+              "build-tools;36.0.0" \
+              "platforms;android-36" \
+              "platforms;android-36.1"; then
+              SUCCESS=true
+              break
+            fi
+            echo "Warning: sdkmanager failed on attempt $ATTEMPT. Retrying in 10s..."
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 10
+          done
+
+          if [ "$SUCCESS" != "true" ]; then
+            echo "Error: sdkmanager failed after $MAX_ATTEMPTS attempts."
+            exit 1
+          fi
+
+          ls -la "$SDK_ROOT/platforms" || true
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
