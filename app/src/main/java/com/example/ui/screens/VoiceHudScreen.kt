@@ -276,6 +276,7 @@ fun VoiceHudScreen(
     val isGeminiLiveMode by viewModel.isGeminiLiveMode.collectAsState()
     val geminiLiveState by viewModel.geminiLiveManager.sessionState.collectAsState()
     val micVolumeLevel by viewModel.micVolumeLevel.collectAsState()
+    val activeVoiceDebugInfo by viewModel.activeVoiceDebugInfo.collectAsState()
 
     val isBatterySaverActive by AriaBatterySaverManager.isBatterySaverActive.collectAsState()
     val batteryLevel by AriaBatterySaverManager.batteryLevel.collectAsState()
@@ -339,6 +340,7 @@ fun VoiceHudScreen(
                 isWakeWordModeEnabled = isWakeWordModeEnabled,
                 isGeminiLiveMode = isGeminiLiveMode,
                 geminiLiveState = geminiLiveState,
+                activeVoiceDebugInfo = activeVoiceDebugInfo,
                 batteryLevel = batteryLevel,
                 isCharging = isCharging,
                 isBatterySaverActive = isBatterySaverActive,
@@ -1474,6 +1476,7 @@ private fun ArcDrawerContent(
     isWakeWordModeEnabled: Boolean,
     isGeminiLiveMode: Boolean,
     geminiLiveState: GeminiLiveSessionState,
+    activeVoiceDebugInfo: String,
     batteryLevel: Int,
     isCharging: Boolean,
     isBatterySaverActive: Boolean,
@@ -1619,6 +1622,36 @@ private fun ArcDrawerContent(
                     onClick = onOpenAddMemory,
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            // Active Voice Engine & Male Voice Telemetry
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(SurfaceDark.copy(alpha = 0.72f))
+                    .border(1.dp, GlassBorderCyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .testTag("voice_engine_debug_badge")
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "VOICE ENGINE TELEMETRY",
+                        color = ElectricCyan,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 0.9.sp
+                    )
+                    Text(
+                        text = activeVoiceDebugInfo,
+                        color = TextSecondary,
+                        fontSize = 9.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             HorizontalDivider(color = GlassBorderCyan.copy(alpha = 0.35f))

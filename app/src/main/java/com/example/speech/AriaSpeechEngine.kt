@@ -16,6 +16,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.BuildConfig
@@ -143,6 +144,9 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     private val _lastRecognizedText = MutableStateFlow("")
     val lastRecognizedText: StateFlow<String> = _lastRecognizedText.asStateFlow()
 
+    private val _activeVoiceDebugInfo = MutableStateFlow("SpeechEngine: Initializing (ElevenLabs=$voiceId)")
+    val activeVoiceDebugInfo: StateFlow<String> = _activeVoiceDebugInfo.asStateFlow()
+
     private var onSpeechResultListener: ((String) -> Unit)? = null
     private var onWakeWordDetectedListener: ((WakeWordParseResult, String) -> Unit)? = null
     private var wakeWordJob: Job? = null
@@ -157,51 +161,28 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     @Volatile
     private var partialWakeMatchedInSession = false
 
+    @Volatile
+    private var lastMaleTtsSelection: MaleTtsSelection? = null
+
     init {
         initSpeechRecognizer()
+        val elevenKeyPresent = getApiKey().isNotBlank()
+        Log.d(
+            VOICE_DEBUG_TAG,
+            "AriaSpeechEngine init | BuildConfig.ELEVENLABS_VOICE_ID='${BuildConfig.ELEVENLABS_VOICE_ID}' -> resolvedVoiceId='$voiceId' (Adam Male) | ElevenLabsKeyConfigured=$elevenKeyPresent"
+        )
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             isNativeTtsInitialized = true
-            val result = nativeTts?.setLanguage(Locale("hi", "IN"))
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                nativeTts?.setLanguage(Locale.US)
-            }
-            nativeTts?.setSpeechRate(_speechRate.value)
-
-            // Select Permanent Male Voice if available on device
-            var selectedMaleVoice = false
-            try {
-                val availableVoices = nativeTts?.voices
-                if (availableVoices != null) {
-                    val maleVoice = availableVoices.firstOrNull { voice ->
-                        val name = voice.name.lowercase(Locale.ROOT)
-                        !name.contains("female") && (
-                            name.contains("-male") ||
-                                name.contains("_male") ||
-                                name.contains("male") ||
-                                name.contains("hi-in-x-hid") ||
-                                name.contains("hi-in-x-hia") ||
-                                name.contains("en-us-x-iom") ||
-                                name.contains("en-us-x-tpd") ||
-                                name.contains("en-in-x-end") ||
-                                name.contains("en-in-x-enc")
-                            )
-                    }
-                    if (maleVoice != null) {
-                        nativeTts?.voice = maleVoice
-                        selectedMaleVoice = true
-                        Log.d("AriaSpeechEngine", "Selected permanent male voice: ${maleVoice.name}")
-                    } else {
-                        Log.d("AriaSpeechEngine", "No explicit male TTS voice tag found; shifting pitch to 0.78f")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("AriaSpeechEngine", "Could not set custom male voice: ${e.message}")
-            }
-            // If emulator/device only ships a female/neutral default voice, 0.78f drops it cleanly into male baritone register
-            nativeTts?.setPitch(if (selectedMaleVoice) 0.90f else 0.78f)
+            val selection = applyStrictMaleTtsVoice(
+                tts = nativeTts,
+                speechRate = _speechRate.value,
+                tag = VOICE_DEBUG_TAG
+            )
+            lastMaleTtsSelection = selection
+            _activeVoiceDebugInfo.value = "Android TTS Ready: voice=${selection.voiceName}, verifiedMale=${selection.isVerifiedMale}, pitch=${selection.appliedPitch}"
 
             nativeTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
@@ -229,7 +210,8 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                 speak(text)
             }
         } else {
-            Log.e("AriaSpeechEngine", "Native TextToSpeech initialization failed: $status")
+            Log.e(VOICE_DEBUG_TAG, "Native TextToSpeech initialization failed: $status")
+            _activeVoiceDebugInfo.value = "Android TTS init failed ($status)"
         }
     }
 
@@ -245,10 +227,13 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
 
         engineScope.launch {
             val key = getApiKey()
+            val fallbackReason: String
             if (key.isNotBlank()) {
                 val cachedFile = getCachedAudioFile(text)
                 if (cachedFile.exists() && cachedFile.length() > 0) {
-                    Log.d("AriaSpeechEngine", "Cache hit! Playing cached audio for query: $text")
+                    val info = "Engine=ELEVENLABS_CACHE | VoiceID=$voiceId (Male)"
+                    _activeVoiceDebugInfo.value = info
+                    Log.d(VOICE_DEBUG_TAG, "$info | Query='${text.take(40)}'")
                     playAudioFile(cachedFile)
                     return@launch
                 }
@@ -259,15 +244,21 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                 _isSynthesizing.value = false
 
                 if (generatedFile != null && generatedFile.exists()) {
+                    val info = "Engine=ELEVENLABS_API | VoiceID=$voiceId (Male) | Model=eleven_multilingual_v2"
+                    _activeVoiceDebugInfo.value = info
+                    Log.d(VOICE_DEBUG_TAG, "$info | Query='${text.take(40)}'")
                     playAudioFile(generatedFile)
                     return@launch
                 }
+                fallbackReason = "ElevenLabs API request failed"
+            } else {
+                fallbackReason = "ELEVENLABS_API_KEY missing/placeholder"
             }
 
-            // Fallback to Native Android TextToSpeech
+            // Fallback to Native Android TextToSpeech (strict male selector)
             withContext(Dispatchers.Main) {
-                Log.w("AriaSpeechEngine", "Using Native Android TTS Fallback for: $text")
-                speakNative(text)
+                Log.w(VOICE_DEBUG_TAG, "Fallback -> Android Native TTS ($fallbackReason) | Query='${text.take(40)}'")
+                speakNative(text, fallbackReason)
             }
         }
     }
@@ -460,12 +451,23 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
         }
     }
 
-    private fun speakNative(text: String) {
+    private fun speakNative(text: String, reason: String = "Direct Native TTS") {
         if (!isNativeTtsInitialized) {
             pendingTextToSpeak = text
             return
         }
         nativeTts?.stop()
+        // Re-enforce strict male voice & baritone pitch right before speaking in case Android TTS reset it
+        val selection = applyStrictMaleTtsVoice(
+            tts = nativeTts,
+            speechRate = _speechRate.value,
+            tag = VOICE_DEBUG_TAG
+        )
+        lastMaleTtsSelection = selection
+        val info = "Engine=ANDROID_NATIVE_TTS | Voice=${selection.voiceName} | VerifiedMale=${selection.isVerifiedMale} | Pitch=${selection.appliedPitch} | Reason=$reason"
+        _activeVoiceDebugInfo.value = info
+        Log.d(VOICE_DEBUG_TAG, info)
+
         val utteranceId = "ARIA_UTTERANCE_${System.currentTimeMillis()}"
         val params = Bundle()
         params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
@@ -951,7 +953,144 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     }
 
     companion object {
+        const val VOICE_DEBUG_TAG = "ARC_VOICE_DEBUG"
         const val DEFAULT_MALE_VOICE_ID = "pNInz6obpgDQGcFmaJgB" // Adam (Male)
+
+        data class MaleTtsSelection(
+            val voiceName: String,
+            val isVerifiedMale: Boolean,
+            val appliedPitch: Float,
+            val detail: String
+        )
+
+        // Verified female voice names & Google TTS female variants that must NEVER be selected
+        private val knownFemaleVoiceTokens = listOf(
+            "female", "woman", "girl",
+            "hi-in-x-hia", "hi-in-x-hic", "hi-in-x-hid",
+            "en-in-x-ena", "en-in-x-enb", "en-in-x-enc",
+            "en-us-x-sfg", "en-us-x-tpc", "en-us-x-tpf", "en-us-x-iog",
+            "en-gb-x-gba", "en-gb-x-gbb", "en-gb-x-gbc", "en-gb-x-rja",
+            "veena", "lekha", "aditi", "raveena", "samantha", "karen", "moira", "tessa", "zira", "hazel"
+        )
+
+        // Ordered by ARC priority: Hindi Male -> Indian English Male -> US/UK Male -> Generic Male tags
+        private val prioritizedMaleVoiceTokens = listOf(
+            "hi-in-x-hie",
+            "en-in-x-end",
+            "en-in-x-ene",
+            "en-us-x-iom",
+            "en-us-x-tpd",
+            "en-us-x-iol",
+            "en-gb-x-rjs",
+            "en-gb-x-fis",
+            "en-gb-x-gbd",
+            "-male",
+            "_male",
+            "#male",
+            " male",
+            "rishi",
+            "daniel",
+            "alex",
+            "david",
+            "mark",
+            "george",
+            "arthur"
+        )
+
+        fun isKnownFemaleVoiceName(voiceName: String): Boolean {
+            val lower = voiceName.lowercase(Locale.ROOT)
+            return knownFemaleVoiceTokens.any { token -> lower.contains(token) }
+        }
+
+        fun isKnownMaleVoiceName(voiceName: String): Boolean {
+            val lower = voiceName.lowercase(Locale.ROOT)
+            if (isKnownFemaleVoiceName(lower)) return false
+            return prioritizedMaleVoiceTokens.any { token -> lower.contains(token) } ||
+                Regex("(^|[^a-z])male([^a-z]|$)").containsMatchIn(lower)
+        }
+
+        fun pickBestMaleVoice(voices: Collection<Voice>): Voice? {
+            if (voices.isEmpty()) return null
+            val candidates = voices.filter { voice ->
+                isKnownMaleVoiceName(voice.name)
+            }
+            if (candidates.isEmpty()) return null
+
+            return candidates.minWithOrNull(
+                compareBy<Voice>(
+                    // Prefer offline local voices so Android never falls back to default female on slow network
+                    { if (it.isNetworkConnectionRequired) 1 else 0 },
+                    // Then follow exact ARC male priority (hi-in-x-hie -> en-in-x-end/ene -> en-us-x-iom/tpd/iol)
+                    { voice ->
+                        val lower = voice.name.lowercase(Locale.ROOT)
+                        val idx = prioritizedMaleVoiceTokens.indexOfFirst { lower.contains(it) }
+                        if (idx >= 0) idx else prioritizedMaleVoiceTokens.size
+                    },
+                    { it.name }
+                )
+            )
+        }
+
+        /**
+         * Enforces a verified male Android TTS voice (when present) and baritone pitch.
+         * Always calls setLanguage BEFORE setVoice so setLanguage never resets the chosen male voice.
+         */
+        fun applyStrictMaleTtsVoice(
+            tts: TextToSpeech?,
+            speechRate: Float = 1.0f,
+            tag: String = VOICE_DEBUG_TAG
+        ): MaleTtsSelection {
+            if (tts == null) {
+                return MaleTtsSelection("unavailable", false, 0.72f, "TextToSpeech null")
+            }
+
+            tts.setSpeechRate(speechRate)
+            return try {
+                val availableVoices = tts.voices ?: emptySet()
+                val maleVoice = pickBestMaleVoice(availableVoices)
+
+                if (maleVoice != null) {
+                    // Set matching language first, then bind exact male voice afterwards
+                    tts.setLanguage(maleVoice.locale)
+                    tts.voice = maleVoice
+                    val pitch = 0.88f
+                    tts.setPitch(pitch)
+                    Log.d(
+                        tag,
+                        "Selected VERIFIED MALE Android TTS voice='${maleVoice.name}' locale=${maleVoice.locale} network=${maleVoice.isNetworkConnectionRequired} pitch=$pitch (from ${availableVoices.size} voices)"
+                    )
+                    MaleTtsSelection(
+                        voiceName = maleVoice.name,
+                        isVerifiedMale = true,
+                        appliedPitch = pitch,
+                        detail = "Verified male voice ${maleVoice.name}"
+                    )
+                } else {
+                    val langRes = tts.setLanguage(Locale("hi", "IN"))
+                    if (langRes == TextToSpeech.LANG_MISSING_DATA || langRes == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        tts.setLanguage(Locale.US)
+                    }
+                    // No verified male voice installed: shift pitch cleanly down to deep baritone register
+                    val pitch = 0.72f
+                    tts.setPitch(pitch)
+                    val currentVoiceName = tts.voice?.name ?: "system-default"
+                    Log.w(
+                        tag,
+                        "No verified male Android TTS voice found among ${availableVoices.size} voices (active='$currentVoiceName'). Applying deep baritone pitch=$pitch"
+                    )
+                    MaleTtsSelection(
+                        voiceName = currentVoiceName,
+                        isVerifiedMale = false,
+                        appliedPitch = pitch,
+                        detail = "Deep baritone fallback pitch=$pitch on $currentVoiceName"
+                    )
+                }
+            } catch (e: Exception) {
+                tts.setPitch(0.72f)
+                Log.e(tag, "Error selecting male TTS voice: ${e.message}")
+                MaleTtsSelection("error-fallback", false, 0.72f, e.message ?: "error")
+            }
+        }
 
         data class WakeWordParseResult(
             val hasWakeWord: Boolean,

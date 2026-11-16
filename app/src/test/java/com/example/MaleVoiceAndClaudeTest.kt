@@ -2,6 +2,7 @@ package com.example
 
 import android.app.Application
 import android.content.Context
+import android.speech.tts.Voice
 import androidx.test.core.app.ApplicationProvider
 import com.example.claude.ClaudeMessagesTransport
 import com.example.claude.ClaudeReasoningEngine
@@ -18,16 +19,19 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.Locale
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class MaleVoiceAndClaudeTest {
+
 
     private lateinit var application: Application
 
@@ -201,5 +205,35 @@ class MaleVoiceAndClaudeTest {
         )
         assertFalse(output.success)
         assertTrue(output.responseData.getBoolean("useGeminiFallback"))
+    }
+
+    @Test
+    fun `strict male TTS selector rejects Google female voice codes and prioritizes verified male voices`() {
+        assertTrue(AriaSpeechEngine.isKnownFemaleVoiceName("hi-in-x-hia-local"))
+        assertTrue(AriaSpeechEngine.isKnownFemaleVoiceName("hi-in-x-hid-local"))
+        assertTrue(AriaSpeechEngine.isKnownFemaleVoiceName("en-in-x-enc-local"))
+        assertTrue(AriaSpeechEngine.isKnownFemaleVoiceName("en-us-x-sfg-local"))
+
+        assertFalse(AriaSpeechEngine.isKnownMaleVoiceName("hi-in-x-hia-local"))
+        assertFalse(AriaSpeechEngine.isKnownMaleVoiceName("hi-in-x-hid-local"))
+        assertFalse(AriaSpeechEngine.isKnownMaleVoiceName("en-in-x-enc-local"))
+
+        assertTrue(AriaSpeechEngine.isKnownMaleVoiceName("hi-in-x-hie-local"))
+        assertTrue(AriaSpeechEngine.isKnownMaleVoiceName("en-in-x-end-local"))
+        assertTrue(AriaSpeechEngine.isKnownMaleVoiceName("en-us-x-iom-local"))
+
+        val femaleHi = Voice("hi-in-x-hia-local", Locale("hi", "IN"), Voice.QUALITY_HIGH, Voice.LATENCY_NORMAL, false, emptySet())
+        val femaleEnIn = Voice("en-in-x-enc-local", Locale("en", "IN"), Voice.QUALITY_HIGH, Voice.LATENCY_NORMAL, false, emptySet())
+        val maleUs = Voice("en-us-x-iom-local", Locale.US, Voice.QUALITY_HIGH, Voice.LATENCY_NORMAL, false, emptySet())
+        val maleHi = Voice("hi-in-x-hie-local", Locale("hi", "IN"), Voice.QUALITY_HIGH, Voice.LATENCY_NORMAL, false, emptySet())
+
+        // Even when female voices appear first, pickBestMaleVoice must select hi-in-x-hie-local
+        val picked = AriaSpeechEngine.pickBestMaleVoice(listOf(femaleHi, femaleEnIn, maleUs, maleHi))
+        assertNotNull(picked)
+        assertEquals("hi-in-x-hie-local", picked?.name)
+
+        // When only female voices exist, pickBestMaleVoice returns null so deep baritone pitch fallback applies
+        val nonePicked = AriaSpeechEngine.pickBestMaleVoice(listOf(femaleHi, femaleEnIn))
+        assertEquals(null, nonePicked)
     }
 }

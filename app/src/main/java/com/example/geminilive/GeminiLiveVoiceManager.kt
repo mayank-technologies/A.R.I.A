@@ -58,12 +58,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
 
     companion object {
         private const val TAG = "GEMINI_LIVE_VOICE"
+        private const val VOICE_DEBUG_TAG = "ARC_VOICE_DEBUG"
         private const val HOST = "generativelanguage.googleapis.com"
         private const val PATH = "/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
 
         // Native Audio Live model required for Affective Dialog (emotional/expressive speech)
         private const val LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
-        private const val FALLBACK_LIVE_MODEL = "models/gemini-2.0-flash-exp"
+        private const val FALLBACK_LIVE_MODEL = "models/gemini-live-2.5-flash-preview"
 
         /**
          * TO TRY ANOTHER MALE VOICE, CHANGE THIS SINGLE CONSTANT:
@@ -126,6 +127,15 @@ class GeminiLiveVoiceManager(private val context: Context) {
     private val _micVolumeLevel = MutableStateFlow(0f)
     val micVolumeLevel: StateFlow<Float> = _micVolumeLevel.asStateFlow()
 
+    private val _activeVoiceDebugInfo = MutableStateFlow(
+        if (hasValidApiKey()) {
+            "Gemini Live Standby (Voice=$SELECTED_VOICE_NAME Male)"
+        } else {
+            "Gemini Live OFF (GEMINI_API_KEY missing/placeholder -> Fallback TTS)"
+        }
+    )
+    val activeVoiceDebugInfo: StateFlow<String> = _activeVoiceDebugInfo.asStateFlow()
+
     // NOTE: Do NOT configure OkHttp pingInterval() for Gemini BidiGenerateContent WebSocket.
     // Google's Bidi gateway does not echo low-level WebSocket PING control frames within OkHttp's window,
     // which causes deterministic SocketTimeoutException ("sent ping but didn't receive pong within 10000ms").
@@ -149,7 +159,9 @@ class GeminiLiveVoiceManager(private val context: Context) {
         }
 
         if (!hasValidApiKey()) {
-            Log.e(TAG, "Valid GEMINI_API_KEY is missing in BuildConfig (.env).")
+            val info = "Engine=FALLBACK_TTS | Reason=GEMINI_API_KEY missing or placeholder ('${BuildConfig.GEMINI_API_KEY.take(12)}')"
+            Log.e(VOICE_DEBUG_TAG, info)
+            _activeVoiceDebugInfo.value = info
             _sessionState.value = GeminiLiveSessionState.ERROR
             _liveTranscript.value = "Gemini API Key missing. Using male fallback TTS."
             drainPendingToFallback()
@@ -159,6 +171,8 @@ class GeminiLiveVoiceManager(private val context: Context) {
         usingFallbackModel = false
         isSetupComplete = false
         _sessionState.value = GeminiLiveSessionState.CONNECTING
+        _activeVoiceDebugInfo.value = "Engine=GEMINI_LIVE | Connecting (Model=$LIVE_MODEL, Voice=$SELECTED_VOICE_NAME Male)"
+        Log.d(VOICE_DEBUG_TAG, _activeVoiceDebugInfo.value)
         _liveTranscript.value = "Connecting to Gemini Live Male Voice (Charon)..."
 
         initAudioTrack()
@@ -199,11 +213,14 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
                 Log.e(TAG, "Gemini Live WebSocket Error: ${t.message}", t)
                 if (!isSetupComplete && !usingFallbackModel) {
-                    Log.w(TAG, "Retrying Gemini Live with fallback model $FALLBACK_LIVE_MODEL")
+                    Log.w(VOICE_DEBUG_TAG, "Gemini Live primary model failed (${t.message}); retrying $FALLBACK_LIVE_MODEL")
                     usingFallbackModel = true
                     openWebSocketConnection()
                     return
                 }
+                val info = "Engine=FALLBACK_TTS | Reason=Gemini Live WebSocket error (${t.message})"
+                Log.w(VOICE_DEBUG_TAG, info)
+                _activeVoiceDebugInfo.value = info
                 _sessionState.value = GeminiLiveSessionState.ERROR
                 _liveTranscript.value = "Live Voice disconnected: ${t.localizedMessage ?: "Network error"}"
                 drainPendingToFallback()
@@ -214,11 +231,14 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
                 Log.d(TAG, "Gemini Live WebSocket closed ($code: $reason)")
                 if (!isSetupComplete && !usingFallbackModel && code != 1000) {
-                    Log.w(TAG, "Setup closed early ($code: $reason). Retrying with fallback model $FALLBACK_LIVE_MODEL")
+                    Log.w(VOICE_DEBUG_TAG, "Gemini Live setup closed ($code: $reason); retrying $FALLBACK_LIVE_MODEL")
                     usingFallbackModel = true
                     openWebSocketConnection()
                     return
                 }
+                val info = "Engine=FALLBACK_TTS | Reason=Gemini Live closed ($code: $reason)"
+                Log.w(VOICE_DEBUG_TAG, info)
+                _activeVoiceDebugInfo.value = info
                 _sessionState.value = GeminiLiveSessionState.DISCONNECTED
                 _micVolumeLevel.value = 0f
                 drainPendingToFallback()
@@ -230,6 +250,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
         setupWatchdogJob = scope.launch {
             kotlinx.coroutines.delay(4500L)
             if (!isSetupComplete) {
+                Log.w(VOICE_DEBUG_TAG, "Gemini Live setupComplete timeout (>4.5s) -> draining pending turns to male fallback TTS")
                 drainPendingToFallback()
             }
         }
@@ -331,7 +352,10 @@ class GeminiLiveVoiceManager(private val context: Context) {
         }
 
         ws.send(setupJson.toString())
-        Log.d(TAG, "Sent Gemini Live Handshake Setup (voice=$SELECTED_VOICE_NAME, affectiveDialog=true)")
+        Log.d(
+            VOICE_DEBUG_TAG,
+            "Engine=GEMINI_LIVE_SETUP_SENT | Model=$modelToUse | Voice=$SELECTED_VOICE_NAME (Male) | AffectiveDialog=${!useFallbackModel}"
+        )
     }
 
     /**
@@ -424,7 +448,10 @@ class GeminiLiveVoiceManager(private val context: Context) {
             // 0. Server setupComplete acknowledgment -> start mic streaming & flush queued speech
             if (root.has("setupComplete")) {
                 isSetupComplete = true
-                Log.d(TAG, "Gemini Live setupComplete received (voice=$SELECTED_VOICE_NAME, fallback=$usingFallbackModel)")
+                val modelUsed = if (usingFallbackModel) FALLBACK_LIVE_MODEL else LIVE_MODEL
+                val info = "Engine=GEMINI_LIVE_CONNECTED | Model=$modelUsed | Voice=$SELECTED_VOICE_NAME (Male)"
+                _activeVoiceDebugInfo.value = info
+                Log.d(VOICE_DEBUG_TAG, info)
                 startMicStreaming(ws)
                 val queued: List<String>
                 synchronized(pendingSpeechTurns) {
@@ -485,6 +512,11 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                 if (mimeType.startsWith("audio/")) {
                                     val b64 = inlineData.optString("data", "")
                                     if (b64.isNotBlank()) {
+                                        if (_sessionState.value != GeminiLiveSessionState.SPEAKING) {
+                                            val info = "Engine=GEMINI_LIVE_AUDIO | Voice=$SELECTED_VOICE_NAME (Male) | 24kHz PCM"
+                                            _activeVoiceDebugInfo.value = info
+                                            Log.d(VOICE_DEBUG_TAG, info)
+                                        }
                                         _sessionState.value = GeminiLiveSessionState.SPEAKING
                                         _micVolumeLevel.value = 0f
                                         val pcmBytes = Base64.decode(b64, Base64.DEFAULT)

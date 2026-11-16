@@ -18,6 +18,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
@@ -29,6 +30,7 @@ import com.example.assistant.glyph.AriaGlyphHardwareManager
 import com.example.assistant.overlay.AriaEdgeGlowOverlayManager
 import com.example.assistant.overlay.AriaEdgeGlowView
 import com.example.data.AriaDatabase
+import com.example.speech.AriaSpeechEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -322,6 +324,15 @@ class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
             }
         })
 
+        val selection = AriaSpeechEngine.applyStrictMaleTtsVoice(
+            tts = textToSpeech,
+            speechRate = 1.0f,
+            tag = AriaSpeechEngine.VOICE_DEBUG_TAG
+        )
+        Log.d(
+            AriaSpeechEngine.VOICE_DEBUG_TAG,
+            "Engine=BACKGROUND_WAKE_TTS | Voice=${selection.voiceName} | VerifiedMale=${selection.isVerifiedMale} | Pitch=${selection.appliedPitch}"
+        )
         textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "aria_bg_speech_${System.currentTimeMillis()}")
     }
 
@@ -336,9 +347,11 @@ class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            textToSpeech?.language = Locale.getDefault()
-            textToSpeech?.setPitch(1.0f)
-            textToSpeech?.setSpeechRate(1.0f)
+            AriaSpeechEngine.applyStrictMaleTtsVoice(
+                tts = textToSpeech,
+                speechRate = 1.0f,
+                tag = AriaSpeechEngine.VOICE_DEBUG_TAG
+            )
         }
     }
 

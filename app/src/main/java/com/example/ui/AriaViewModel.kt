@@ -104,6 +104,25 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         maxOf(speechVol, liveVol)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
+    val activeVoiceDebugInfo: StateFlow<String> = combine(
+        geminiLiveManager.activeVoiceDebugInfo,
+        speechEngine.activeVoiceDebugInfo,
+        geminiLiveManager.sessionState
+    ) { liveInfo, ttsInfo, liveState ->
+        if (liveState == com.example.geminilive.GeminiLiveSessionState.CONNECTED ||
+            liveState == com.example.geminilive.GeminiLiveSessionState.SPEAKING ||
+            liveState == com.example.geminilive.GeminiLiveSessionState.LISTENING
+        ) {
+            liveInfo
+        } else {
+            "$liveInfo | $ttsInfo"
+        }
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        "Voice Init..."
+    )
+
     fun setElevenLabsApiKey(key: String) {
         speechEngine.setApiKey(key)
     }
@@ -250,7 +269,16 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     val memoryFacts: StateFlow<List<MemoryFactItem>> = _memoryFacts.asStateFlow()
 
     init {
+        android.util.Log.d(
+            AriaSpeechEngine.VOICE_DEBUG_TAG,
+            "Startup Voice Audit | GeminiLiveDefault=${_isGeminiLiveMode.value} | GeminiKeyValid=${geminiLiveManager.hasValidApiKey()} | GeminiVoice=${com.example.geminilive.GeminiLiveVoiceManager.SELECTED_VOICE_NAME} | ElevenLabsVoice=${speechEngine.getActiveVoiceId()}"
+        )
         geminiLiveManager.setOnFallbackSpeechListener { pendingText ->
+            android.util.Log.w(
+                AriaSpeechEngine.VOICE_DEBUG_TAG,
+                "GeminiLive fallback listener triggered -> delegating to AriaSpeechEngine male TTS"
+            )
+            addActivityLog("🔊", "Voice Fallback Active", geminiLiveManager.activeVoiceDebugInfo.value)
             if (!speechEngine.isMuted.value) {
                 speechEngine.speak(pendingText)
             }
@@ -698,7 +726,13 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         }
         // When Gemini Live Voice WebSocket is enabled & key is present, connect/queue and speak
         // via Gemini Live's natural male voice (Charon) instead of overlapping legacy TTS.
-        if (_isGeminiLiveMode.value && geminiLiveManager.hasValidApiKey()) {
+        val liveEnabled = _isGeminiLiveMode.value
+        val hasGeminiKey = geminiLiveManager.hasValidApiKey()
+        android.util.Log.d(
+            AriaSpeechEngine.VOICE_DEBUG_TAG,
+            "speakResponse routing | liveEnabled=$liveEnabled | hasGeminiKey=$hasGeminiKey | liveState=${geminiLiveManager.sessionState.value}"
+        )
+        if (liveEnabled && hasGeminiKey) {
             if (geminiLiveManager.sessionState.value == com.example.geminilive.GeminiLiveSessionState.DISCONNECTED) {
                 geminiLiveManager.startLiveSession()
             }
