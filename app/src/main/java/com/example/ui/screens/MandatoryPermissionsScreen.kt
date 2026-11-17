@@ -110,14 +110,14 @@ fun MandatoryPermissionsScreen(
             PermissionItemInfo(
                 id = "mic",
                 title = "Microphone / Audio",
-                explanation = "Voice commands aur ARC voice recognition ke liye zaroori hai",
+                explanation = "Sirf jab aap mic tap karein ya 'Hey ARC' bole, tab voice commands sunne ke liye (no hidden recording).",
                 icon = Icons.Default.Mic,
                 manifestPermissions = listOf(Manifest.permission.RECORD_AUDIO)
             ),
             PermissionItemInfo(
                 id = "notifications",
                 title = "Notifications",
-                explanation = "Reminders, scheduled alerts aur voice updates ke liye",
+                explanation = "Reminders, weather alerts aur background listening active hone par hamesha dikhne wala notification dikhane ke liye.",
                 icon = Icons.Default.Notifications,
                 manifestPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     listOf(Manifest.permission.POST_NOTIFICATIONS)
@@ -126,7 +126,7 @@ fun MandatoryPermissionsScreen(
             PermissionItemInfo(
                 id = "contacts",
                 title = "Contacts & Phone Calls",
-                explanation = "Voice commands par contacts call ya message karne ke liye",
+                explanation = "Sirf jab aap 'Call [naam]' ya WhatsApp message bolte hain, tabhi contact search aur call initiate karne ke liye.",
                 icon = Icons.Default.Contacts,
                 manifestPermissions = listOf(
                     Manifest.permission.READ_CONTACTS,
@@ -136,7 +136,7 @@ fun MandatoryPermissionsScreen(
             PermissionItemInfo(
                 id = "location",
                 title = "Location",
-                explanation = "Mausam, live navigation aur local tools ke liye",
+                explanation = "Sirf aapke bolne par local mausam, navigation aur cab pickup address dhundhne ke liye.",
                 icon = Icons.Default.LocationOn,
                 manifestPermissions = listOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,
@@ -146,7 +146,7 @@ fun MandatoryPermissionsScreen(
             PermissionItemInfo(
                 id = "storage",
                 title = "Files & Media",
-                explanation = "Media, photos aur documents search/storage ke liye",
+                explanation = "Sirf aapke voice command par local photos, audio ya documents dhundhne ke liye.",
                 icon = Icons.Default.Folder,
                 manifestPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     listOf(
@@ -161,14 +161,14 @@ fun MandatoryPermissionsScreen(
             PermissionItemInfo(
                 id = "camera",
                 title = "Camera & Flashlight",
-                explanation = "Torch on/off aur Anti-Theft Guard ke visible front-camera alert snapshot ke liye",
+                explanation = "Torch on/off karne aur Anti-Theft Guard trigger hone par visible alert snapshot dikhane ke liye.",
                 icon = Icons.Default.CameraAlt,
                 manifestPermissions = listOf(Manifest.permission.CAMERA)
             ),
             PermissionItemInfo(
                 id = "bluetooth",
                 title = "Bluetooth Control",
-                explanation = "Voice command se Bluetooth on/off panel kholne ke liye",
+                explanation = "Voice command par device Bluetooth settings/panel kholne ke liye.",
                 icon = Icons.Default.Bluetooth,
                 manifestPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     listOf(Manifest.permission.BLUETOOTH_CONNECT)
@@ -176,16 +176,16 @@ fun MandatoryPermissionsScreen(
             ),
             PermissionItemInfo(
                 id = "notification_access",
-                title = "WhatsApp Notification Access",
-                explanation = "Unread WhatsApp messages padhkar voice me sunane ke liye Settings > Notification Access me ARC enable karein",
+                title = "WhatsApp Notification Access (Optional)",
+                explanation = "Sirf tab jab aap unread WhatsApp messages padhkar sunane ko kahen (Settings se enable karein).",
                 icon = Icons.Default.MarkChatUnread,
                 manifestPermissions = emptyList(),
                 isNotificationAccess = true
             ),
             PermissionItemInfo(
                 id = "battery",
-                title = "Background Execution",
-                explanation = "Background reminders aur instant voice assistant readiness ke liye",
+                title = "Background Execution (Optional)",
+                explanation = "Scheduled reminders aur optional 'Hey ARC' service ko OS pause hone se bachane ke liye.",
                 icon = Icons.Default.BatteryAlert,
                 manifestPermissions = emptyList(),
                 isBatteryOptimization = true
@@ -344,12 +344,12 @@ fun MandatoryPermissionsScreen(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "Namaste $userName! ARIA ko full functionality ke liye niche diye gaye permissions ki zaroorat hai.",
+                    text = "Namaste $userName! Har permission ka exact reason niche likha hai — koi bhi data chhup ke record ya upload nahi hota.",
                     color = TextPrimary,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
-                    lineHeight = 19.sp,
+                    lineHeight = 18.sp,
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
             }

@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import com.example.assistant.security.PermissionCategory
+import com.example.assistant.security.PermissionUsageLogManager
 
 /**
  * FEATURE 3: Direct Phone Calling & Contact Matching Handler
@@ -95,6 +97,12 @@ object ContactCallHandler {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(callIntent)
+                PermissionUsageLogManager.logUsage(
+                    context = context,
+                    category = PermissionCategory.PHONE,
+                    action = "Direct Phone Call",
+                    reason = "Called $displayNameToSpeak per user voice command"
+                )
                 val successMsg = "Calling $displayNameToSpeak, Boss!"
                 ContactCallResult.Success(successMsg, phoneNumberToCall)
             } catch (e: Exception) {

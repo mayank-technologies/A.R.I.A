@@ -21,6 +21,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.assistant.AriaCommandProcessor
@@ -29,6 +30,8 @@ import com.example.assistant.battery.AriaBatterySaverManager
 import com.example.assistant.glyph.AriaGlyphHardwareManager
 import com.example.assistant.overlay.AriaEdgeGlowOverlayManager
 import com.example.assistant.overlay.AriaEdgeGlowView
+import com.example.assistant.security.PermissionCategory
+import com.example.assistant.security.PermissionUsageLogManager
 import com.example.data.AriaDatabase
 import com.example.speech.AriaSpeechEngine
 import kotlinx.coroutines.CoroutineScope
@@ -45,7 +48,8 @@ import java.util.Locale
 /**
  * Foreground Service for Background Always-Listening Wake Word & Command Execution.
  * Runs continuously even when the app is minimized / in background.
- * Triggers the Software Screen Edge Glow Overlay when listening or speaking.
+ * Transparency Guarantee: Always displays a persistent, non-dismissible notification
+ * ("ARC is listening in background") while active; refuses to run silently without it.
  */
 class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
 
@@ -63,12 +67,61 @@ class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
     companion object {
         const val CHANNEL_ID = "aria_background_wake_channel"
         const val NOTIFICATION_ID = 2002
+        const val MANDATORY_NOTIFICATION_TITLE = "ARC is listening in background"
+        const val MANDATORY_NOTIFICATION_TEXT = "Say 'Hey ARC' anytime • Persistent indicator • Tap Stop to turn off"
 
         const val ACTION_START = "com.example.aria.action.START_BACKGROUND_WAKE"
         const val ACTION_STOP = "com.example.aria.action.STOP_BACKGROUND_WAKE"
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
+
+        /**
+         * Builds the mandatory, non-dismissible foreground service notification so users always know
+         * when background wake-word listening is active.
+         */
+        fun buildPersistentListeningNotification(context: Context): Notification {
+            val openAppIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context, 0, openAppIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val stopIntent = Intent(context, AriaBackgroundWakeService::class.java).apply {
+                action = ACTION_STOP
+            }
+            val stopPendingIntent = PendingIntent.getService(
+                context, 1, stopIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setContentTitle(MANDATORY_NOTIFICATION_TITLE)
+                .setContentText(MANDATORY_NOTIFICATION_TEXT)
+                .setStyle(
+                    NotificationCompat.BigTextStyle()
+                        .bigText("$MANDATORY_NOTIFICATION_TEXT. No silent recording without this badge.")
+                )
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setOnlyAlertOnce(true)
+                .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .setContentIntent(pendingIntent)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Listening", stopPendingIntent)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+
+            // Enforce non-dismissible flags so the notification remains persistent while active
+            notification.flags = notification.flags or
+                Notification.FLAG_ONGOING_EVENT or
+                Notification.FLAG_NO_CLEAR
+            return notification
+        }
 
         fun start(context: Context) {
             val intent = Intent(context, AriaBackgroundWakeService::class.java).apply {
@@ -101,12 +154,45 @@ class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                _isRunning.value = false
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
                 stopSelf()
                 return START_NOT_STICKY
             }
             else -> {
-                startForegroundNotification()
+                // Transparency & Policy check: never run background mic without RECORD_AUDIO permission
+                val hasMicPerm = ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.RECORD_AUDIO
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (!hasMicPerm) {
+                    Log.w("AriaBackgroundWake", "Refusing background wake service without RECORD_AUDIO permission")
+                    _isRunning.value = false
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
+                val notificationStarted = startForegroundNotification()
+                if (!notificationStarted) {
+                    // Never run silently in background if mandatory notification could not be posted
+                    _isRunning.value = false
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
                 _isRunning.value = true
+                PermissionUsageLogManager.logUsage(
+                    context = this,
+                    category = PermissionCategory.MICROPHONE,
+                    action = "Background 'Hey ARC' Listening",
+                    reason = "Persistent notification active (ARC is listening in background)",
+                    dedupeWindowMs = 30_000L
+                )
                 startListeningLoop()
             }
         }
@@ -117,57 +203,39 @@ class AriaBackgroundWakeService : Service(), TextToSpeech.OnInitListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "ARC Background Wake Engine",
+                "ARC Background Listening Indicator",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Monitors for wake word 'Hey ARC' and runs voice commands in the background"
+                description = "Persistent notification shown whenever ARC is listening for 'Hey ARC' in the background"
                 setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
     }
 
-    private fun startForegroundNotification() {
-        val openAppIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, openAppIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
+    private fun startForegroundNotification(): Boolean {
+        val notification = buildPersistentListeningNotification(this)
 
-        val stopIntent = Intent(this, AriaBackgroundWakeService::class.java).apply {
-            action = ACTION_STOP
-        }
-        val stopPendingIntent = PendingIntent.getService(
-            this, 1, stopIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("ARC Background Voice Engine Active")
-            .setContentText("Listening for 'Hey ARC' • Edge Glow Visual Active")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setOngoing(true)
-            .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Engine", stopPendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 14+ specific foreground service type for microphone
-            try {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 14+ specific foreground service type for microphone
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                 )
-            } catch (e: Throwable) {
+            } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+            true
+        } catch (e: SecurityException) {
+            Log.e("AriaBackgroundWake", "Cannot start foreground mic service without visible FGS permission: ${e.message}")
+            false
+        } catch (e: Throwable) {
+            Log.e("AriaBackgroundWake", "Failed to post mandatory background listening notification: ${e.message}")
+            false
         }
     }
 

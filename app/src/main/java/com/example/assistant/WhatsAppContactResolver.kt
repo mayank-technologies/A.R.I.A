@@ -6,6 +6,8 @@ import android.database.Cursor
 import android.net.Uri
 import android.provider.ContactsContract
 import android.util.Log
+import com.example.assistant.security.PermissionCategory
+import com.example.assistant.security.PermissionUsageLogManager
 import java.util.Locale
 
 data class ContactMatch(
@@ -159,6 +161,14 @@ object WhatsAppContactResolver {
     fun getAllContacts(context: Context): List<ContactMatch> {
         val contactsList = mutableListOf<ContactMatch>()
         var cursor: Cursor? = null
+
+        PermissionUsageLogManager.logUsage(
+            context = context,
+            category = PermissionCategory.CONTACTS,
+            action = "Contacts Lookup",
+            reason = "Searched phonebook for user call / WhatsApp command",
+            dedupeWindowMs = 5_000L
+        )
 
         try {
             val projection = arrayOf(

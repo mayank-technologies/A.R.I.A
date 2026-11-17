@@ -11,6 +11,8 @@ import android.util.Log
 import com.example.BuildConfig
 import com.example.api.GeminiClient
 import com.example.assistant.DeviceClockHelper
+import com.example.assistant.security.PermissionCategory
+import com.example.assistant.security.PermissionUsageLogManager
 import com.example.claude.ClaudeReasoningEngine
 import com.example.speech.SpeechWaveformAnalyzer
 import kotlinx.coroutines.CoroutineScope
@@ -839,6 +841,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
 
             audioRecord?.startRecording()
             _sessionState.value = GeminiLiveSessionState.LISTENING
+            PermissionUsageLogManager.logUsage(
+                context = context,
+                category = PermissionCategory.MICROPHONE,
+                action = "Gemini Live Mic Stream",
+                reason = "Full-duplex live voice session active",
+                dedupeWindowMs = 15_000L
+            )
 
             recordJob = scope.launch {
                 val buffer = ByteArray(2048)

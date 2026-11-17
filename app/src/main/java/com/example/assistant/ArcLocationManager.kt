@@ -13,6 +13,8 @@ import android.os.CancellationSignal
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
+import com.example.assistant.security.PermissionCategory
+import com.example.assistant.security.PermissionUsageLogManager
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
@@ -148,6 +150,13 @@ object ArcLocationManager {
 
         val appContext = context.applicationContext ?: context
         val isPrecise = isPreciseLocationGranted(appContext)
+        PermissionUsageLogManager.logUsage(
+            context = appContext,
+            category = PermissionCategory.LOCATION,
+            action = "GPS Location Read",
+            reason = "Fetched device location for weather, maps, or ride pickup",
+            dedupeWindowMs = 15_000L
+        )
 
         // 1. Primary: FusedLocationProviderClient (getCurrentLocation -> lastLocation)
         var rawLocation: Location? = fetchFusedLocation(appContext, isPrecise)
@@ -197,6 +206,13 @@ object ArcLocationManager {
         }
 
         val loc = getBestLastKnownFrameworkLocation(context) ?: return _cachedLocation.value
+        PermissionUsageLogManager.logUsage(
+            context = context,
+            category = PermissionCategory.LOCATION,
+            action = "Cached Location Read",
+            reason = "Read last known GPS fix for user command",
+            dedupeWindowMs = 15_000L
+        )
         val info = ArcLocationInfo(
             latitude = loc.latitude,
             longitude = loc.longitude,

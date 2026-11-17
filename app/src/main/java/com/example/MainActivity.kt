@@ -101,24 +101,8 @@ class MainActivity : ComponentActivity() {
         // Schedule daily morning weather briefing notification at 8:00 AM
         com.example.notification.AriaNotificationScheduler.scheduleDailyMorningWeatherNotification(this, hourOfDay = 8, minute = 0)
 
-        // Request POST_NOTIFICATIONS runtime permission on Android 13+ (API 33+)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
-            }
-        }
-
-        // Check and request CALL_PHONE & READ_CONTACTS permissions if needed
-        val requiredCallPermissions = arrayOf(
-            android.Manifest.permission.CALL_PHONE,
-            android.Manifest.permission.READ_CONTACTS
-        )
-        val ungrantedCallPermissions = requiredCallPermissions.filter {
-            checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
-        }
-        if (ungrantedCallPermissions.isNotEmpty()) {
-            requestPermissions(ungrantedCallPermissions.toTypedArray(), 102)
-        }
+        // Note: Runtime permissions (Notifications, Contacts, Calls, Mic, Location, Camera) are requested
+        // exclusively via MandatoryPermissionsScreen or contextual rationale prompts with clear 1-line reasoning.
 
         enableEdgeToEdge()
         setContent {

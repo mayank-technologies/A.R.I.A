@@ -21,6 +21,8 @@ import android.speech.tts.Voice
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.BuildConfig
+import com.example.assistant.security.PermissionCategory
+import com.example.assistant.security.PermissionUsageLogManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -784,6 +786,13 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
             _isListening.value = false
             _micVolumeLevel.value = 0f
             speechRecognizer?.startListening(intent)
+            PermissionUsageLogManager.logUsage(
+                context = context,
+                category = PermissionCategory.MICROPHONE,
+                action = "In-App Wake Standby",
+                reason = "Listening for 'Hey ARC' / 'JARVIS' while app is open",
+                dedupeWindowMs = 120_000L
+            )
         } catch (e: Exception) {
             _micVolumeLevel.value = 0f
             Log.e("AriaSpeechEngine", "Error starting wake word listener: ${e.message}")
@@ -1083,6 +1092,13 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                 speechRecognizer?.cancel()
                 isIgnoringStaleCancelErrors = false
                 speechRecognizer?.startListening(intent)
+                PermissionUsageLogManager.logUsage(
+                    context = context,
+                    category = PermissionCategory.MICROPHONE,
+                    action = "Voice Command Mic",
+                    reason = "User tapped mic or triggered ARC command",
+                    dedupeWindowMs = 2_000L
+                )
                 Log.d(MIC_DEBUG_TAG, "SpeechRecognizer.startListening() dispatched cleanly")
             } catch (e: Exception) {
                 isIgnoringStaleCancelErrors = false

@@ -62,6 +62,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.assistant.security.AntiTheftSirenManager
+import com.example.assistant.security.PermissionCategory
+import com.example.assistant.security.PermissionUsageLogManager
 import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.DeepSpace
 import com.example.ui.theme.SurfaceDark
@@ -210,6 +212,12 @@ fun AntiTheftAlertDialog(
                                         object : ImageCapture.OnImageSavedCallback {
                                             override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                                                 AntiTheftSirenManager.recordVisibleAlertPhoto(outFile.absolutePath)
+                                                PermissionUsageLogManager.logUsage(
+                                                    context = context,
+                                                    category = PermissionCategory.CAMERA,
+                                                    action = "Anti-Theft Alert Photo",
+                                                    reason = "Visible front-camera alert snapshot triggered"
+                                                )
                                             }
 
                                             override fun onError(exception: ImageCaptureException) {

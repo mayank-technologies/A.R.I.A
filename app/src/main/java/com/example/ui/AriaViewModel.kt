@@ -183,6 +183,57 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         return newState
     }
 
+    /**
+     * Toggles the "Hey ARC" Foreground Background Wake Service.
+     * Transparency guarantee: starting the service posts the non-dismissible
+     * "ARC is listening in background" notification; stopping removes it immediately.
+     */
+    fun toggleBackgroundWakeService(): Boolean {
+        val ctx = getApplication<Application>()
+        val currentlyRunning = com.example.assistant.background.AriaBackgroundWakeService.isRunning.value
+        return if (currentlyRunning) {
+            com.example.assistant.background.AriaBackgroundWakeService.stop(ctx)
+            _latestResponse.value = "Background 'Hey ARC' listening stopped."
+            addActivityLog("🛑", "Background Listening OFF", "Persistent mic service stopped")
+            false
+        } else {
+            if (!speechEngine.hasAudioPermission()) {
+                _needsMicPermission.value = true
+                val msg = "Microphone permission needed to enable Background 'Hey ARC' listening."
+                _uiErrorMessage.value = msg
+                _latestResponse.value = msg
+                false
+            } else {
+                _uiErrorMessage.value = null
+                com.example.assistant.background.AriaBackgroundWakeService.start(ctx)
+                _latestResponse.value = "Background 'Hey ARC' listening ON — persistent notification active."
+                addActivityLog("🛡️", "Background Listening ON", "Persistent notification active")
+                true
+            }
+        }
+    }
+
+    /**
+     * Toggles the transparent Anti-Theft Siren Guard (motion/unplug alarm + visible alert UI).
+     */
+    fun toggleAntiTheftGuard(): com.example.assistant.security.SirenGuardState {
+        val ctx = getApplication<Application>()
+        val current = com.example.assistant.security.AntiTheftSirenManager.guardState.value
+        val message = if (current == com.example.assistant.security.SirenGuardState.DISARMED) {
+            com.example.assistant.security.AntiTheftSirenManager.armSecurity(ctx)
+        } else {
+            com.example.assistant.security.AntiTheftSirenManager.disarmSecurity(ctx)
+        }
+        val next = com.example.assistant.security.AntiTheftSirenManager.guardState.value
+        _latestResponse.value = message
+        addActivityLog(
+            icon = if (next == com.example.assistant.security.SirenGuardState.ARMED) "🚨" else "🔓",
+            title = if (next == com.example.assistant.security.SirenGuardState.ARMED) "Anti-Theft Guard ARMED" else "Anti-Theft Guard OFF",
+            detail = "Loud siren & visible alert ${if (next == com.example.assistant.security.SirenGuardState.ARMED) "armed" else "disarmed"}"
+        )
+        return next
+    }
+
     fun onMicPermissionUpdated(startListeningIfGranted: Boolean = false) {
         val granted = speechEngine.hasAudioPermission()
         _needsMicPermission.value = !granted
@@ -321,6 +372,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         // Register timezone/time listener from ViewModel startup (even before VoiceHudScreen mounts)
         // so early auto-greeting and Gemini Live never read a stale cached JVM TimeZone.
         val appCtx = getApplication<Application>()
+        com.example.assistant.security.PermissionUsageLogManager.ensureLoaded(appCtx)
         val tzReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 if (intent?.action == Intent.ACTION_TIMEZONE_CHANGED) {

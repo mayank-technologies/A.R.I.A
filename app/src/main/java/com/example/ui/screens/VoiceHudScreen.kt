@@ -61,14 +61,18 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -124,7 +128,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.assistant.ArcLocationManager
 import com.example.assistant.DeviceClockHelper
+import com.example.assistant.background.AriaBackgroundWakeService
 import com.example.assistant.battery.AriaBatterySaverManager
+import com.example.assistant.security.AntiTheftSirenManager
+import com.example.assistant.security.PermissionUsageLogManager
+import com.example.assistant.security.SirenGuardState
 import com.example.geminilive.GeminiLiveSessionState
 import com.example.speech.WakeWordState
 import com.example.ui.AriaViewModel
@@ -286,11 +294,13 @@ fun VoiceHudScreen(
     val batteryLevel by AriaBatterySaverManager.batteryLevel.collectAsState()
     val isCharging by AriaBatterySaverManager.isCharging.collectAsState()
     val manualBatteryOverride by AriaBatterySaverManager.manualOverride.collectAsState()
+    val isBackgroundWakeRunning by AriaBackgroundWakeService.isRunning.collectAsState()
+    val sirenGuardState by AntiTheftSirenManager.guardState.collectAsState()
 
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    var hasPromptedLocationOnce by remember { mutableStateOf(false) }
     var pendingMicStartAfterPermission by remember { mutableStateOf(false) }
+    var pendingPermissionRationale by remember { mutableStateOf<String?>(null) }
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
@@ -311,10 +321,7 @@ fun VoiceHudScreen(
     }
 
     LaunchedEffect(needsLocationPermission) {
-        if (needsLocationPermission && !hasPromptedLocationOnce) {
-            hasPromptedLocationOnce = true
-            locationPermissionLauncher.launch(ArcLocationManager.REQUIRED_LOCATION_PERMISSIONS)
-        } else if (!needsLocationPermission) {
+        if (!needsLocationPermission) {
             viewModel.onLocationPermissionUpdated()
         }
     }
@@ -323,6 +330,8 @@ fun VoiceHudScreen(
     var showChatSheet by remember { mutableStateOf(false) }
     var showAddMemoryDialog by remember { mutableStateOf(false) }
     var showBatterySaverDialog by remember { mutableStateOf(false) }
+    var showAboutPrivacyDialog by remember { mutableStateOf(false) }
+    var showRecentActivityDialog by remember { mutableStateOf(false) }
     var newMemoryKey by remember { mutableStateOf("") }
     var newMemoryVal by remember { mutableStateOf("") }
 
@@ -345,12 +354,31 @@ fun VoiceHudScreen(
                 isMuted = isMuted,
                 isSpeaking = isSpeaking,
                 isWakeWordModeEnabled = isWakeWordModeEnabled,
+                isBackgroundWakeRunning = isBackgroundWakeRunning,
+                sirenGuardState = sirenGuardState,
                 isGeminiLiveMode = isGeminiLiveMode,
                 geminiLiveState = geminiLiveState,
                 activeVoiceDebugInfo = activeVoiceDebugInfo,
                 batteryLevel = batteryLevel,
                 isCharging = isCharging,
                 isBatterySaverActive = isBatterySaverActive,
+                onToggleBackgroundWake = {
+                    if (needsMicPermission && !isBackgroundWakeRunning) {
+                        pendingMicStartAfterPermission = false
+                        pendingPermissionRationale = "MIC"
+                    } else {
+                        viewModel.toggleBackgroundWakeService()
+                    }
+                },
+                onToggleAntiTheftGuard = { viewModel.toggleAntiTheftGuard() },
+                onOpenAboutPrivacy = {
+                    scope.launch { drawerState.close() }
+                    showAboutPrivacyDialog = true
+                },
+                onOpenRecentActivity = {
+                    scope.launch { drawerState.close() }
+                    showRecentActivityDialog = true
+                },
                 onOpenBatteryDialog = {
                     scope.launch { drawerState.close() }
                     showBatterySaverDialog = true
@@ -377,7 +405,7 @@ fun VoiceHudScreen(
                 )
         ) {
             val isCompactHeight = maxHeight < 640.dp
-            val avatarSize = if (isCompactHeight) 188.dp else 236.dp
+            val avatarSize = if (isCompactHeight) 136.dp else 236.dp
             val scrollState = rememberScrollState()
 
             Column(
@@ -470,25 +498,46 @@ fun VoiceHudScreen(
                 }
 
                 // -------------------------------------------------------------
-                // 1B. JARVIS-STYLE WAKE WORD EAR STATUS PILL
+                // 1B. JARVIS-STYLE WAKE WORD EAR + AUTO-SYSTEMS TRANSPARENCY BAR
                 // -------------------------------------------------------------
-                WakeWordHudPill(
-                    isPoweredOn = isArcPoweredOn,
-                    isWakeWordEnabled = isWakeWordModeEnabled,
-                    wakeWordState = wakeWordState,
-                    wakeFlashActive = wakeFlashActive,
-                    lastWakePhrase = lastWakePhrase,
-                    micVolume = micVolumeLevel,
-                    needsMicPermission = needsMicPermission,
-                    disableAnimations = isBatterySaverActive,
-                    onClick = {
-                        if (needsMicPermission) {
-                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        } else {
-                            viewModel.toggleWakeWordMode()
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    WakeWordHudPill(
+                        isPoweredOn = isArcPoweredOn,
+                        isWakeWordEnabled = isWakeWordModeEnabled,
+                        wakeWordState = wakeWordState,
+                        wakeFlashActive = wakeFlashActive,
+                        lastWakePhrase = lastWakePhrase,
+                        micVolume = micVolumeLevel,
+                        needsMicPermission = needsMicPermission,
+                        disableAnimations = isBatterySaverActive,
+                        onClick = {
+                            if (needsMicPermission) {
+                                pendingMicStartAfterPermission = false
+                                pendingPermissionRationale = "MIC"
+                            } else {
+                                viewModel.toggleWakeWordMode()
+                            }
                         }
-                    }
-                )
+                    )
+
+                    AutoSystemsStatusBar(
+                        isBackgroundWakeRunning = isBackgroundWakeRunning,
+                        sirenGuardState = sirenGuardState,
+                        onToggleBackgroundWake = {
+                            if (needsMicPermission && !isBackgroundWakeRunning) {
+                                pendingMicStartAfterPermission = false
+                                pendingPermissionRationale = "MIC"
+                            } else {
+                                viewModel.toggleBackgroundWakeService()
+                            }
+                        },
+                        onToggleAntiTheft = { viewModel.toggleAntiTheftGuard() }
+                    )
+                }
 
                 // -------------------------------------------------------------
                 // 2. CENTRAL TRANSPARENT CORE PARTICLE AVATAR + SONAR RINGS + POWER + STATUS
@@ -515,7 +564,7 @@ fun VoiceHudScreen(
                             .clickable {
                                 if (needsMicPermission) {
                                     pendingMicStartAfterPermission = true
-                                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    pendingPermissionRationale = "MIC"
                                 } else {
                                     viewModel.activateArcWithGreeting()
                                 }
@@ -705,9 +754,7 @@ fun VoiceHudScreen(
                 ) {
                     if (needsLocationPermission) {
                         Surface(
-                            onClick = {
-                                locationPermissionLauncher.launch(ArcLocationManager.REQUIRED_LOCATION_PERMISSIONS)
-                            },
+                            onClick = { pendingPermissionRationale = "LOCATION" },
                             shape = RoundedCornerShape(20.dp),
                             color = WarningAmber.copy(alpha = 0.12f),
                             border = BorderStroke(1.dp, WarningAmber.copy(alpha = 0.5f)),
@@ -749,7 +796,7 @@ fun VoiceHudScreen(
                             accentColor = ElectricCyan,
                             onClick = {
                                 if (needsLocationPermission) {
-                                    locationPermissionLauncher.launch(ArcLocationManager.REQUIRED_LOCATION_PERMISSIONS)
+                                    pendingPermissionRationale = "LOCATION"
                                 } else {
                                     viewModel.requestLocalWeatherUpdate()
                                 }
@@ -795,7 +842,7 @@ fun VoiceHudScreen(
                     onMicClick = {
                         if (needsMicPermission) {
                             pendingMicStartAfterPermission = true
-                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            pendingPermissionRationale = "MIC"
                         } else {
                             viewModel.activateArcWithGreeting()
                         }
@@ -1272,6 +1319,218 @@ fun VoiceHudScreen(
             shape = RoundedCornerShape(20.dp)
         )
     }
+
+    // -------------------------------------------------------------
+    // TRANSPARENCY: ONE-LINE CONTEXTUAL PERMISSION RATIONALE DIALOG
+    // -------------------------------------------------------------
+    pendingPermissionRationale?.let { permType ->
+        val isMic = permType == "MIC"
+        AlertDialog(
+            onDismissRequest = {
+                pendingMicStartAfterPermission = false
+                pendingPermissionRationale = null
+            },
+            title = {
+                Text(
+                    text = if (isMic) "WHY ARC NEEDS MICROPHONE" else "WHY ARC NEEDS LOCATION",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = ElectricCyan
+                )
+            },
+            text = {
+                Text(
+                    text = if (isMic) {
+                        "Sirf jab aap mic tap karein ya 'Hey ARC' bole, tab aapki voice command sunne ke liye microphone chahiye — koi hidden background recording nahi hoti."
+                    } else {
+                        "Sirf aapke bolne par aapke current area ka mausam, navigation aur cab pickup address dikhane ke liye GPS location chahiye."
+                    },
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp,
+                    color = TextPrimary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingPermissionRationale = null
+                        if (isMic) {
+                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        } else {
+                            locationPermissionLauncher.launch(ArcLocationManager.REQUIRED_LOCATION_PERMISSIONS)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan),
+                    modifier = Modifier.testTag("rationale_allow_button")
+                ) {
+                    Text("Allow", color = DeepSpace, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        pendingMicStartAfterPermission = false
+                        pendingPermissionRationale = null
+                    },
+                    modifier = Modifier.testTag("rationale_cancel_button")
+                ) {
+                    Text("Not Now", color = TextSecondary, fontSize = 12.sp)
+                }
+            },
+            containerColor = Color(0xFF0F172A),
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+
+    // -------------------------------------------------------------
+    // ABOUT / PRIVACY & TRANSPARENCY DIALOG (Opened from ☰ Drawer)
+    // -------------------------------------------------------------
+    if (showAboutPrivacyDialog) {
+        AboutPrivacyDialog(
+            isBackgroundWakeRunning = isBackgroundWakeRunning,
+            isInAppWakeWordEnabled = isWakeWordModeEnabled,
+            sirenGuardState = sirenGuardState,
+            onToggleBackgroundWake = {
+                if (needsMicPermission && !isBackgroundWakeRunning) {
+                    pendingMicStartAfterPermission = false
+                    pendingPermissionRationale = "MIC"
+                } else {
+                    viewModel.toggleBackgroundWakeService()
+                }
+            },
+            onToggleAntiTheftGuard = { viewModel.toggleAntiTheftGuard() },
+            onToggleInAppWakeWord = {
+                if (needsMicPermission && !isWakeWordModeEnabled) {
+                    pendingMicStartAfterPermission = false
+                    pendingPermissionRationale = "MIC"
+                } else {
+                    viewModel.toggleWakeWordMode()
+                }
+            },
+            onOpenRecentActivity = {
+                showAboutPrivacyDialog = false
+                showRecentActivityDialog = true
+            },
+            onDismiss = { showAboutPrivacyDialog = false }
+        )
+    }
+
+    // -------------------------------------------------------------
+    // PERMISSION-USAGE TRANSPARENCY LOG DIALOG ("RECENT ACTIVITY")
+    // -------------------------------------------------------------
+    if (showRecentActivityDialog) {
+        RecentActivityDialog(
+            onDismiss = { showRecentActivityDialog = false }
+        )
+    }
+}
+
+/**
+ * Compact Home HUD transparency bar displaying live ON/OFF status of ARC's auto-triggered systems
+ * (Background "Hey ARC" Listening & Anti-Theft Siren Guard) so users always know what is armed.
+ */
+@Composable
+private fun AutoSystemsStatusBar(
+    isBackgroundWakeRunning: Boolean,
+    sirenGuardState: SirenGuardState,
+    onToggleBackgroundWake: () -> Unit,
+    onToggleAntiTheft: () -> Unit
+) {
+    val bgColor = if (isBackgroundWakeRunning) ElectricEmerald else TextSecondary
+    val guardColor = when (sirenGuardState) {
+        SirenGuardState.DISARMED -> TextSecondary
+        SirenGuardState.ARMED -> CyberCyan
+        SirenGuardState.TRIGGERED -> WarningAmber
+    }
+    val guardLabel = when (sirenGuardState) {
+        SirenGuardState.DISARMED -> "SIREN GUARD: OFF"
+        SirenGuardState.ARMED -> "SIREN GUARD: ARMED"
+        SirenGuardState.TRIGGERED -> "SIREN: TRIGGERED"
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = 420.dp)
+            .testTag("auto_systems_status_bar"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            onClick = onToggleBackgroundWake,
+            shape = RoundedCornerShape(16.dp),
+            color = SurfaceDark.copy(alpha = 0.58f),
+            border = BorderStroke(
+                1.dp,
+                if (isBackgroundWakeRunning) bgColor.copy(alpha = 0.68f) else GlassBorderCyan.copy(alpha = 0.3f)
+            ),
+            modifier = Modifier
+                .weight(1f)
+                .defaultMinSize(minHeight = 48.dp)
+                .testTag("hud_bg_listening_status")
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.NotificationsActive,
+                    contentDescription = "Background Listening Status",
+                    tint = bgColor,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isBackgroundWakeRunning) "BG LISTEN: ON" else "BG LISTEN: OFF",
+                    color = if (isBackgroundWakeRunning) bgColor else TextSecondary,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        Surface(
+            onClick = onToggleAntiTheft,
+            shape = RoundedCornerShape(16.dp),
+            color = SurfaceDark.copy(alpha = 0.58f),
+            border = BorderStroke(
+                1.dp,
+                if (sirenGuardState != SirenGuardState.DISARMED) guardColor.copy(alpha = 0.72f) else GlassBorderCyan.copy(alpha = 0.3f)
+            ),
+            modifier = Modifier
+                .weight(1f)
+                .defaultMinSize(minHeight = 48.dp)
+                .testTag("hud_antitheft_status")
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Security,
+                    contentDescription = "Anti-Theft Siren Guard Status",
+                    tint = guardColor,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = guardLabel,
+                    color = if (sirenGuardState != SirenGuardState.DISARMED) guardColor else TextSecondary,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
 }
 
 /**
@@ -1548,8 +1807,8 @@ private fun BottomHudActionRow(
 }
 
 /**
- * Navigation Drawer containing Transcript History, Voice Terminal, Wake-Word,
- * Gemini Live toggle, Battery Saver, and Memory controls.
+ * Navigation Drawer containing Auto-System ON/OFF controls, About & Privacy,
+ * Permission-Usage Audit Log ("Recent Activity"), Voice Terminal, and Transcript History.
  */
 @Composable
 private fun ArcDrawerContent(
@@ -1562,12 +1821,18 @@ private fun ArcDrawerContent(
     isMuted: Boolean,
     isSpeaking: Boolean,
     isWakeWordModeEnabled: Boolean,
+    isBackgroundWakeRunning: Boolean,
+    sirenGuardState: SirenGuardState,
     isGeminiLiveMode: Boolean,
     geminiLiveState: GeminiLiveSessionState,
     activeVoiceDebugInfo: String,
     batteryLevel: Int,
     isCharging: Boolean,
     isBatterySaverActive: Boolean,
+    onToggleBackgroundWake: () -> Unit,
+    onToggleAntiTheftGuard: () -> Unit,
+    onOpenAboutPrivacy: () -> Unit,
+    onOpenRecentActivity: () -> Unit,
     onOpenBatteryDialog: () -> Unit,
     onOpenAddMemory: () -> Unit,
     onCloseDrawer: () -> Unit
@@ -1575,6 +1840,7 @@ private fun ArcDrawerContent(
     val isLiveConnected = geminiLiveState == GeminiLiveSessionState.CONNECTED ||
             geminiLiveState == GeminiLiveSessionState.LISTENING ||
             geminiLiveState == GeminiLiveSessionState.SPEAKING
+    val permissionAuditEntries by PermissionUsageLogManager.entries.collectAsState()
 
     ModalDrawerSheet(
         drawerContainerColor = CarbonBlack,
@@ -1585,9 +1851,9 @@ private fun ArcDrawerContent(
             modifier = Modifier
                 .fillMaxHeight()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Drawer Header
+            // Drawer Header (Fixed)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1612,7 +1878,7 @@ private fun ArcDrawerContent(
                             letterSpacing = 2.5.sp
                         )
                         Text(
-                            text = "SYSTEMS & TRANSCRIPT",
+                            text = "PRIVACY, SYSTEMS & LOGS",
                             color = TextSecondary,
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
@@ -1634,198 +1900,311 @@ private fun ArcDrawerContent(
 
             HorizontalDivider(color = GlassBorderCyan.copy(alpha = 0.35f))
 
-            // System Toggles Grid (Wake-Word, Gemini Live, Battery, Standby)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                DrawerToggleChip(
-                    label = if (isWakeWordModeEnabled) "WAKE: ON" else "WAKE: OFF",
-                    isActive = isWakeWordModeEnabled,
-                    activeColor = ElectricEmerald,
-                    onClick = { viewModel.toggleWakeWordMode() },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("wake_word_toggle_badge")
-                )
-                DrawerToggleChip(
-                    label = if (isLiveConnected) "LIVE: ON" else if (isGeminiLiveMode) "LIVE..." else "GEMINI LIVE",
-                    isActive = isLiveConnected || isGeminiLiveMode,
-                    activeColor = CyberCyan,
-                    onClick = { viewModel.toggleGeminiLiveMode() },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("gemini_live_mode_badge")
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                DrawerToggleChip(
-                    label = if (isBatterySaverActive) "ECO $batteryLevel%" else "PWR $batteryLevel%",
-                    isActive = isCharging || isBatterySaverActive,
-                    activeColor = if (isBatterySaverActive) WarningAmber else ElectricEmerald,
-                    onClick = onOpenBatteryDialog,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("battery_gauge_button")
-                )
-                DrawerToggleChip(
-                    label = if (assistantStatus == AssistantStatus.SLEEP) "WAKE UP" else "STANDBY",
-                    isActive = assistantStatus != AssistantStatus.SLEEP,
-                    activeColor = ElectricCyan,
-                    onClick = { viewModel.toggleSleepMode() },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            // Voice Controls (Mute / Replay / Brief / Memory)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                DrawerToggleChip(
-                    label = if (isMuted) "MUTED" else "VOICE ON",
-                    isActive = !isMuted,
-                    activeColor = if (isMuted) WarningAmber else ElectricEmerald,
-                    onClick = { viewModel.toggleTtsMute() },
-                    modifier = Modifier.weight(1f)
-                )
-                DrawerToggleChip(
-                    label = "BRIEFING",
-                    isActive = true,
-                    activeColor = ReactorGold,
-                    onClick = {
-                        onCloseDrawer()
-                        viewModel.triggerBriefingSummary()
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-                DrawerToggleChip(
-                    label = "+ MEMORY",
-                    isActive = false,
-                    activeColor = HologramBlue,
-                    onClick = onOpenAddMemory,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            // Active Voice Engine & Male Voice Telemetry
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(SurfaceDark.copy(alpha = 0.72f))
-                    .border(1.dp, GlassBorderCyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
-                    .testTag("voice_engine_debug_badge")
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = "VOICE ENGINE TELEMETRY",
-                        color = ElectricCyan,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 0.9.sp
-                    )
-                    Text(
-                        text = activeVoiceDebugInfo,
-                        color = TextSecondary,
-                        fontSize = 9.5.sp,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            HorizontalDivider(color = GlassBorderCyan.copy(alpha = 0.35f))
-
-            // Latest Voice Terminal Response
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF070E1B))
-                    .border(1.dp, GlassBorderCyan, RoundedCornerShape(12.dp))
-                    .padding(10.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "LATEST OUTPUT",
-                            color = ElectricCyan,
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(
-                                text = "Replay",
-                                color = ElectricCyan,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.clickable { viewModel.replaySpeech() }
-                            )
-                            if (voiceHistory.isNotEmpty()) {
-                                Text(
-                                    text = "Clear",
-                                    color = WarningAmber,
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.clickable { viewModel.clearVoiceHistory() }
-                                )
-                            }
-                        }
-                    }
-                    if (lastQuery.isNotBlank()) {
-                        Text(
-                            text = "YOU: $lastQuery",
-                            color = TextSecondary,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                    Text(
-                        text = latestResponse,
-                        color = if (isSpeaking) ElectricCyan else TextPrimary,
-                        fontSize = 11.5.sp,
-                        lineHeight = 16.sp
-                    )
-                    if (pendingWebUrl != null) {
-                        TextButton(
-                            onClick = { viewModel.openWebUrlInApp(pendingWebUrl) },
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text("Open Link", color = ElectricCyan, fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
-
-            // Transcript History List
-            Text(
-                text = "TRANSCRIPT (${voiceHistory.size})",
-                color = TextSecondary,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 1.sp
-            )
-
+            // Scrollable Drawer Body so controls and transcript never overflow on compact viewports
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // System Toggles Grid (Wake-Word, Gemini Live, Battery, Standby)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            DrawerToggleChip(
+                                label = if (isWakeWordModeEnabled) "WAKE: ON" else "WAKE: OFF",
+                                isActive = isWakeWordModeEnabled,
+                                activeColor = ElectricEmerald,
+                                onClick = { viewModel.toggleWakeWordMode() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("wake_word_toggle_badge")
+                            )
+                            DrawerToggleChip(
+                                label = if (isLiveConnected) "LIVE: ON" else if (isGeminiLiveMode) "LIVE..." else "GEMINI LIVE",
+                                isActive = isLiveConnected || isGeminiLiveMode,
+                                activeColor = CyberCyan,
+                                onClick = { viewModel.toggleGeminiLiveMode() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("gemini_live_mode_badge")
+                            )
+                        }
+
+                        // Auto-Triggered Features Transparency Row (Background Service + Anti-Theft Guard)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            DrawerToggleChip(
+                                label = if (isBackgroundWakeRunning) "BG LISTEN: ON" else "BG LISTEN: OFF",
+                                isActive = isBackgroundWakeRunning,
+                                activeColor = ElectricEmerald,
+                                onClick = onToggleBackgroundWake,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("drawer_bg_listening_chip")
+                            )
+                            val guardActive = sirenGuardState != SirenGuardState.DISARMED
+                            DrawerToggleChip(
+                                label = when (sirenGuardState) {
+                                    SirenGuardState.DISARMED -> "SIREN GUARD: OFF"
+                                    SirenGuardState.ARMED -> "SIREN: ARMED"
+                                    SirenGuardState.TRIGGERED -> "SIREN: ACTIVE"
+                                },
+                                isActive = guardActive,
+                                activeColor = if (sirenGuardState == SirenGuardState.TRIGGERED) WarningAmber else CyberCyan,
+                                onClick = onToggleAntiTheftGuard,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("drawer_antitheft_chip")
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            DrawerToggleChip(
+                                label = if (isBatterySaverActive) "ECO $batteryLevel%" else "PWR $batteryLevel%",
+                                isActive = isCharging || isBatterySaverActive,
+                                activeColor = if (isBatterySaverActive) WarningAmber else ElectricEmerald,
+                                onClick = onOpenBatteryDialog,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("battery_gauge_button")
+                            )
+                            DrawerToggleChip(
+                                label = if (assistantStatus == AssistantStatus.SLEEP) "WAKE UP" else "STANDBY",
+                                isActive = assistantStatus != AssistantStatus.SLEEP,
+                                activeColor = ElectricCyan,
+                                onClick = { viewModel.toggleSleepMode() },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        // Voice Controls (Mute / Briefing / Memory)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            DrawerToggleChip(
+                                label = if (isMuted) "MUTED" else "VOICE ON",
+                                isActive = !isMuted,
+                                activeColor = if (isMuted) WarningAmber else ElectricEmerald,
+                                onClick = { viewModel.toggleTtsMute() },
+                                modifier = Modifier.weight(1f)
+                            )
+                            DrawerToggleChip(
+                                label = "BRIEFING",
+                                isActive = true,
+                                activeColor = ReactorGold,
+                                onClick = {
+                                    onCloseDrawer()
+                                    viewModel.triggerBriefingSummary()
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            DrawerToggleChip(
+                                label = "+ MEMORY",
+                                isActive = false,
+                                activeColor = HologramBlue,
+                                onClick = onOpenAddMemory,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        // Trust & Privacy Menu Section (About / Privacy + Recent Permission Activity)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                onClick = onOpenAboutPrivacy,
+                                shape = RoundedCornerShape(12.dp),
+                                color = ElectricEmerald.copy(alpha = 0.14f),
+                                border = BorderStroke(1.dp, ElectricEmerald.copy(alpha = 0.6f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("drawer_about_privacy_button")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Shield,
+                                        contentDescription = "About and Privacy",
+                                        tint = ElectricEmerald,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = "ABOUT / PRIVACY",
+                                        color = ElectricEmerald,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                onClick = onOpenRecentActivity,
+                                shape = RoundedCornerShape(12.dp),
+                                color = ElectricCyan.copy(alpha = 0.14f),
+                                border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("drawer_recent_activity_button")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.History,
+                                        contentDescription = "Recent Permission Activity",
+                                        tint = ElectricCyan,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = "ACTIVITY (${permissionAuditEntries.size})",
+                                        color = ElectricCyan,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Active Voice Engine & Male Voice Telemetry
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(SurfaceDark.copy(alpha = 0.72f))
+                            .border(1.dp, GlassBorderCyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .testTag("voice_engine_debug_badge")
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "VOICE ENGINE TELEMETRY",
+                                color = ElectricCyan,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 0.9.sp
+                            )
+                            Text(
+                                text = activeVoiceDebugInfo,
+                                color = TextSecondary,
+                                fontSize = 9.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                // Latest Voice Terminal Response
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF070E1B))
+                            .border(1.dp, GlassBorderCyan, RoundedCornerShape(12.dp))
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "LATEST OUTPUT",
+                                    color = ElectricCyan,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        text = "Replay",
+                                        color = ElectricCyan,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.clickable { viewModel.replaySpeech() }
+                                    )
+                                    if (voiceHistory.isNotEmpty()) {
+                                        Text(
+                                            text = "Clear",
+                                            color = WarningAmber,
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.clickable { viewModel.clearVoiceHistory() }
+                                        )
+                                    }
+                                }
+                            }
+                            if (lastQuery.isNotBlank()) {
+                                Text(
+                                    text = "YOU: $lastQuery",
+                                    color = TextSecondary,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            Text(
+                                text = latestResponse,
+                                color = if (isSpeaking) ElectricCyan else TextPrimary,
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp
+                            )
+                            if (pendingWebUrl != null) {
+                                TextButton(
+                                    onClick = { viewModel.openWebUrlInApp(pendingWebUrl) },
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Text("Open Link", color = ElectricCyan, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Transcript History Header
+                item {
+                    Text(
+                        text = "TRANSCRIPT (${voiceHistory.size})",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
+                }
+
                 if (voiceHistory.isEmpty()) {
                     item {
                         Text(

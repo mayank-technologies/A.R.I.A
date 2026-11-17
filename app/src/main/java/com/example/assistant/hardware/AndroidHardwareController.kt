@@ -16,6 +16,8 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.example.assistant.security.PermissionCategory
+import com.example.assistant.security.PermissionUsageLogManager
 
 /**
  * Result of executing a hardware control command.
@@ -57,6 +59,12 @@ object AndroidHardwareController {
 
             cameraManager.setTorchMode(flashCameraId, enable)
             isTorchOn = enable
+            PermissionUsageLogManager.logUsage(
+                context = context,
+                category = PermissionCategory.CAMERA,
+                action = if (enable) "Flashlight ON" else "Flashlight OFF",
+                reason = "Rear flash unit toggled per user command"
+            )
             val stateText = if (enable) "chalu kar di hai 🔦" else "band kar di hai"
             HardwareActionResult.Success("Torch $stateText, Boss!")
         } catch (e: Exception) {

@@ -6,6 +6,8 @@ import android.content.Intent
 import android.database.Cursor
 import android.provider.ContactsContract
 import android.util.Log
+import com.example.assistant.security.PermissionCategory
+import com.example.assistant.security.PermissionUsageLogManager
 
 sealed class ContactsActionResult {
     data class Success(val message: String) : ContactsActionResult()
@@ -58,6 +60,13 @@ object GoogleContactsVoiceHandler {
     }
 
     private fun searchContactInDevice(context: Context, name: String): String? {
+        PermissionUsageLogManager.logUsage(
+            context = context,
+            category = PermissionCategory.CONTACTS,
+            action = "Contacts Search",
+            reason = "Searched phonebook per user voice command",
+            dedupeWindowMs = 5_000L
+        )
         val contentResolver: ContentResolver = context.contentResolver
         val cursor: Cursor? = contentResolver.query(
             ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
