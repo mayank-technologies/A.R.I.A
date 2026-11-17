@@ -97,6 +97,15 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     private val _needsMicPermission = MutableStateFlow(!speechEngine.hasAudioPermission())
     val needsMicPermission: StateFlow<Boolean> = _needsMicPermission.asStateFlow()
 
+    private val _uiErrorMessage = MutableStateFlow<String?>(null)
+    val uiErrorMessage: StateFlow<String?> = _uiErrorMessage.asStateFlow()
+
+    fun dismissErrorMessage() {
+        _uiErrorMessage.value = null
+        geminiLiveManager.clearConnectionError()
+        speechEngine.clearSpeechError()
+    }
+
     private val _wakeFlashActive = MutableStateFlow(false)
     val wakeFlashActive: StateFlow<Boolean> = _wakeFlashActive.asStateFlow()
     private var wakeFlashJob: Job? = null
@@ -158,8 +167,11 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         _needsMicPermission.value = !speechEngine.hasAudioPermission()
         if (newState) {
             if (!speechEngine.hasAudioPermission()) {
-                _latestResponse.value = "Microphone permission needed for 'Hey ARC' / 'JARVIS' wake-word detection."
+                val permMsg = "Microphone permission needed for 'Hey ARC' / 'JARVIS' wake-word detection."
+                _uiErrorMessage.value = permMsg
+                _latestResponse.value = permMsg
             } else {
+                _uiErrorMessage.value = null
                 _latestResponse.value = "Wake-Word Listener Active 🎙️ Say 'Hey ARC' or 'JARVIS' anytime hands-free!"
                 addActivityLog("🎙️", "Wake-Word Armed", "Listening for 'Hey ARC' & 'JARVIS'")
             }
@@ -171,10 +183,12 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         return newState
     }
 
-    fun onMicPermissionUpdated() {
+    fun onMicPermissionUpdated(startListeningIfGranted: Boolean = false) {
         val granted = speechEngine.hasAudioPermission()
         _needsMicPermission.value = !granted
+        android.util.Log.d(AriaSpeechEngine.MIC_DEBUG_TAG, "onMicPermissionUpdated | granted=$granted | startAfter=$startListeningIfGranted")
         if (granted) {
+            _uiErrorMessage.value = null
             addActivityLog("🎙️", "Microphone Active", "JARVIS / Hey ARC wake-word ready")
             if (_isArcPoweredOn.value && prefs.getBoolean("wake_word_enabled", true)) {
                 speechEngine.setExternalMicBusy(geminiLiveManager.isMicCapturingAudio())
@@ -182,6 +196,14 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 speechEngine.refreshWakeWordAvailability()
             }
+            if (startListeningIfGranted) {
+                startListening()
+            }
+        } else {
+            val deniedMsg = "Microphone permission needed. Allow Microphone permission to talk with ARC."
+            _uiErrorMessage.value = deniedMsg
+            _latestResponse.value = deniedMsg
+            addActivityLog("⚠️", "Microphone Denied", deniedMsg)
         }
     }
 
@@ -325,6 +347,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         } catch (_: Exception) {
         }
 
+        com.example.api.GeminiClient.auditRuntimeKeys()
         android.util.Log.d(
             AriaSpeechEngine.VOICE_DEBUG_TAG,
             "Startup Voice Audit | GeminiLiveDefault=${_isGeminiLiveMode.value} | GeminiKeyValid=${geminiLiveManager.hasValidApiKey()} | GeminiVoice=${com.example.geminilive.GeminiLiveVoiceManager.SELECTED_VOICE_NAME} | ElevenLabsVoice=${speechEngine.getActiveVoiceId()}"
@@ -339,10 +362,35 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
                 speechEngine.speak(pendingText)
             }
         }
+        speechEngine.setOnSpeechErrorListener { errInfo ->
+            android.util.Log.w(
+                AriaSpeechEngine.MIC_DEBUG_TAG,
+                "AriaViewModel caught SpeechError: ${errInfo.codeName} -> ${errInfo.userMessage}"
+            )
+            _uiErrorMessage.value = errInfo.userMessage
+            _latestResponse.value = errInfo.userMessage
+            addActivityLog("⚠️", "Mic Error (${errInfo.codeName})", errInfo.userMessage)
+            if (errInfo.codeName == "PERMISSION_REQUIRED") {
+                _needsMicPermission.value = true
+            }
+            if (_isArcPoweredOn.value && _assistantStatus.value == AssistantStatus.LISTENING) {
+                _assistantStatus.value = AssistantStatus.IDLE
+            }
+            geminiLiveManager.resumeMicIfConnected()
+        }
         speechEngine.setOnWakeWordDetectedListener { parseResult, rawTranscript ->
             handleWakeWordTrigger(parseResult, rawTranscript)
         }
         checkOnboardingStatus()
+        // Surface Gemini Live WebSocket / API key connection failures clearly in HUD/Chat
+        viewModelScope.launch {
+            geminiLiveManager.connectionError.collect { connErr ->
+                if (!connErr.isNullOrBlank()) {
+                    _uiErrorMessage.value = connErr
+                    addActivityLog("⚠️", "Voice Connection Failed", connErr)
+                }
+            }
+        }
         // Sync local TTS speaking -> IDLE transition
         viewModelScope.launch {
             speechEngine.isSpeaking.collect { speaking ->
@@ -435,7 +483,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
             _isInitializing.value = false
 
             if (isComplete && hasCompletedPermissions) {
-                if (_isGeminiLiveMode.value && geminiLiveManager.hasValidApiKey()) {
+                if (_isGeminiLiveMode.value) {
                     geminiLiveManager.startLiveSession()
                 }
                 if (prefs.getBoolean("wake_word_enabled", true)) {
@@ -500,6 +548,10 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun activateArcWithGreeting() {
+        android.util.Log.d(
+            AriaSpeechEngine.MIC_DEBUG_TAG,
+            "Mic/Orb pressed | poweredOn=${_isArcPoweredOn.value} | status=${_assistantStatus.value} | hasPerm=${speechEngine.hasAudioPermission()}"
+        )
         if (!_isArcPoweredOn.value || _assistantStatus.value == AssistantStatus.SLEEP) {
             powerOnArc()
             return
@@ -507,17 +559,15 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         when (_assistantStatus.value) {
             AssistantStatus.LISTENING -> {
                 speechEngine.stopListening()
+                geminiLiveManager.resumeMicIfConnected()
                 _assistantStatus.value = AssistantStatus.IDLE
             }
             AssistantStatus.SPEAKING -> {
                 stopSpeaking()
+                startListening()
             }
             else -> {
-                if (!hasAutoGreeted) {
-                    triggerBriefingSummary(listenAfter = true)
-                } else {
-                    startListening()
-                }
+                startListening()
             }
         }
     }
@@ -660,6 +710,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     fun submitTextCommand(query: String) {
         if (query.isBlank()) return
 
+        _uiErrorMessage.value = null
         addActivityLog("🎙️", "User spoke", "\"$query\"")
 
         val parseResult = AriaSpeechEngine.parseWakeWord(query)
@@ -676,61 +727,100 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         }
         _assistantStatus.value = AssistantStatus.PROCESSING
         addActivityLog("⚙️", "Planning response", "Processing intent: \"$actualQuery\"")
+        android.util.Log.d(
+            com.example.api.GeminiClient.CONN_DEBUG_TAG,
+            "submitTextCommand -> processing '${actualQuery.take(60)}'"
+        )
 
         viewModelScope.launch {
-            val result = commandProcessor.processCommand(actualQuery, _userName.value)
-            when (result) {
-                is AriaCommandResult.TextResponse -> {
-                    when (result.routineAction) {
-                        "GOOD_NIGHT" -> {
-                            powerOffArc(customFarewell = result.response)
-                        }
-                        "GOOD_MORNING" -> {
-                            _isArcPoweredOn.value = true
-                            speechEngine.setWakeWordModeEnabled(true)
-                            prefs.edit().putBoolean("wake_word_enabled", true).apply()
-                            _latestResponse.value = result.response
-                            addActivityLog("☀️", "Good Morning Routine", "ARC powered ON & wake-word active")
-                            speakResponse(result.response)
-                        }
-                        else -> {
-                            _latestResponse.value = result.response
-                            addActivityLog("💬", "Response generated", result.response.take(60) + if (result.response.length > 60) "..." else "")
-                            if (result.openUrl != null) {
-                                _pendingWebUrl.value = result.openUrl
-                                _activeWebUrl.value = result.openUrl
-                                addActivityLog("🌐", "Web URL opened", result.openUrl)
+            try {
+                val result = commandProcessor.processCommand(actualQuery, _userName.value)
+                when (result) {
+                    is AriaCommandResult.TextResponse -> {
+                        when (result.routineAction) {
+                            "GOOD_NIGHT" -> {
+                                powerOffArc(customFarewell = result.response)
                             }
-                            speakResponse(result.response)
+                            "GOOD_MORNING" -> {
+                                _isArcPoweredOn.value = true
+                                speechEngine.setWakeWordModeEnabled(true)
+                                prefs.edit().putBoolean("wake_word_enabled", true).apply()
+                                _latestResponse.value = result.response
+                                addActivityLog("☀️", "Good Morning Routine", "ARC powered ON & wake-word active")
+                                speakResponse(result.response)
+                            }
+                            else -> {
+                                if (result.category == "AI_ERROR") {
+                                    _uiErrorMessage.value = result.response
+                                }
+                                _latestResponse.value = result.response
+                                addActivityLog("💬", "Response generated", result.response.take(60) + if (result.response.length > 60) "..." else "")
+                                if (result.openUrl != null) {
+                                    _pendingWebUrl.value = result.openUrl
+                                    _activeWebUrl.value = result.openUrl
+                                    addActivityLog("🌐", "Web URL opened", result.openUrl)
+                                }
+                                speakResponse(result.response)
+                            }
                         }
                     }
+                    is AriaCommandResult.LaunchApp -> {
+                        _latestResponse.value = result.response
+                        _activeAppDialog.value = result.appType
+                        addActivityLog("📱", "App launched", result.appType)
+                        speakResponse(result.response)
+                    }
+                    is AriaCommandResult.CloseBrowser -> {
+                        _latestResponse.value = result.response
+                        closeWebBrowser()
+                        addActivityLog("✖️", "Browser closed", "Returned to Voice HUD")
+                        speakResponse(result.response)
+                    }
                 }
-                is AriaCommandResult.LaunchApp -> {
-                    _latestResponse.value = result.response
-                    _activeAppDialog.value = result.appType
-                    addActivityLog("📱", "App launched", result.appType)
-                    speakResponse(result.response)
-                }
-                is AriaCommandResult.CloseBrowser -> {
-                    _latestResponse.value = result.response
-                    closeWebBrowser()
-                    addActivityLog("✖️", "Browser closed", "Returned to Voice HUD")
-                    speakResponse(result.response)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                val errText = "Chat failed: ${e.localizedMessage ?: "Network or AI connection error"}"
+                android.util.Log.e(com.example.api.GeminiClient.CONN_DEBUG_TAG, "submitTextCommand failed: ${e.message}", e)
+                _uiErrorMessage.value = errText
+                _latestResponse.value = errText
+                addActivityLog("⚠️", "Command Failed", errText)
+                if (_isArcPoweredOn.value) {
+                    _assistantStatus.value = AssistantStatus.IDLE
                 }
             }
         }
     }
 
     fun startListening() {
+        _uiErrorMessage.value = null
         if (!_isArcPoweredOn.value || _assistantStatus.value == AssistantStatus.SLEEP) {
             _isArcPoweredOn.value = true
             _assistantStatus.value = AssistantStatus.IDLE
         }
+
+        // Release Gemini Live AudioRecord first so SpeechRecognizer never hits ERROR_AUDIO/BUSY
+        geminiLiveManager.pauseMicForExternalRecognizer()
+        speechEngine.stopSpeaking()
+        geminiLiveManager.stopCurrentPlayback()
+
+        if (!speechEngine.hasAudioPermission()) {
+            _needsMicPermission.value = true
+            val permErr = "Microphone permission needed. Allow Microphone permission to speak to ARC."
+            _uiErrorMessage.value = permErr
+            _latestResponse.value = permErr
+            _assistantStatus.value = AssistantStatus.IDLE
+            android.util.Log.e(AriaSpeechEngine.MIC_DEBUG_TAG, "startListening blocked: RECORD_AUDIO permission missing")
+            geminiLiveManager.resumeMicIfConnected()
+            return
+        }
+
         _assistantStatus.value = AssistantStatus.LISTENING
         speechEngine.startListening { recognizedText ->
+            geminiLiveManager.resumeMicIfConnected()
             if (recognizedText.isNotBlank()) {
                 submitTextCommand(recognizedText)
-            } else if (_isArcPoweredOn.value) {
+            } else if (_isArcPoweredOn.value && _assistantStatus.value == AssistantStatus.LISTENING) {
                 _assistantStatus.value = AssistantStatus.IDLE
             }
         }

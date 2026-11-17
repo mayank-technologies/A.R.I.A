@@ -23,10 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -64,9 +60,7 @@ import com.example.ui.theme.SurfaceVariantDark
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.WarningAmber
-import androidx.compose.material.icons.filled.Code
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Person
@@ -127,7 +121,6 @@ fun QuickToolsScreen(
     val currentCity by viewModel.currentCity.collectAsState()
     val needsLocationPermission by viewModel.needsLocationPermission.collectAsState()
 
-    var showDeveloperHubDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
     var showOverlayPermissionDialog by remember { mutableStateOf(false) }
     var showIosInfoDialog by remember { mutableStateOf(false) }
@@ -135,7 +128,6 @@ fun QuickToolsScreen(
 
     var editNameText by remember(userName) { mutableStateOf(userName) }
     var weatherCity by remember(currentCity) { mutableStateOf(currentCity) }
-    var wikiSearchText by remember { mutableStateOf("") }
     var calcInput by remember { mutableStateOf("") }
     var calcResult by remember { mutableStateOf("0") }
     var notepadText by remember { mutableStateOf("") }
@@ -386,50 +378,12 @@ fun QuickToolsScreen(
         }
     }
 
-    if (showDeveloperHubDialog) {
-        Dialog(
-            onDismissRequest = { showDeveloperHubDialog = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(DeepSpace)
-                    .padding(8.dp)
-            ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "🐍 Developer Hub & Guides",
-                            color = CyberCyan,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Button(
-                            onClick = { showDeveloperHubDialog = false },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Close", color = Color.White, fontSize = 12.sp)
-                        }
-                    }
-                    PythonTutorialHubScreen()
-                }
-            }
-        }
-    }
-
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .background(DeepSpace)
-            .padding(16.dp),
+            .padding(16.dp)
+            .testTag("quick_tools_list"),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Header
@@ -442,7 +396,7 @@ fun QuickToolsScreen(
                     color = TextPrimary
                 )
                 Text(
-                    text = "Profile Settings, Screen Sharing, Weather, Wikipedia, Calculator & Notepad",
+                    text = "Profile Settings, Screen Sharing, Weather, Calculator & Notepad",
                     fontSize = 12.sp,
                     color = TextSecondary
                 )
@@ -1157,58 +1111,6 @@ fun QuickToolsScreen(
             }
         }
 
-        // 0. Developer Hub & Python Guides Card
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showDeveloperHubDialog = true },
-                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                shape = RoundedCornerShape(20.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.4f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .background(CyberCyan.copy(alpha = 0.15f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Code,
-                            contentDescription = "Developer Hub",
-                            tint = CyberCyan,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "🐍 Python & Flutter Developer Hub",
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Guides, Python Backend Code, Wake Word, GPS & Calendar Sync",
-                            color = TextSecondary,
-                            fontSize = 12.sp
-                        )
-                    }
-                    Button(
-                        onClick = { showDeveloperHubDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Open", color = DeepSpace, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
         // 1. Weather Module Card
         item {
             Card(
@@ -1289,144 +1191,6 @@ fun QuickToolsScreen(
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Text(text = "Check", fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Wikipedia Search Module Card
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.3f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.MenuBook,
-                            contentDescription = "Wikipedia",
-                            tint = CyberCyan,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Wikipedia Instant Knowledge",
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = wikiSearchText,
-                            onValueChange = { wikiSearchText = it },
-                            placeholder = { Text("Search Wikipedia...", color = TextSecondary) },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = SurfaceVariantDark,
-                                unfocusedContainerColor = SurfaceVariantDark,
-                                focusedBorderColor = CyberCyan,
-                                unfocusedBorderColor = CyberCyan.copy(alpha = 0.3f),
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        Button(
-                            onClick = {
-                                if (wikiSearchText.isNotBlank()) {
-                                    viewModel.submitTextCommand("Wikipedia: $wikiSearchText")
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint = Color.Black
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Quick Web Browser Launchers
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, CyberCyan.copy(alpha = 0.3f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Language,
-                            contentDescription = "Browser Launchers",
-                            tint = ElectricEmerald,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Browser & App Shortcuts",
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceAround
-                    ) {
-                        val shortcuts = listOf(
-                            "YouTube" to "https://youtube.com",
-                            "Google" to "https://google.com",
-                            "GitHub" to "https://github.com",
-                            "Maps" to "https://maps.google.com"
-                        )
-
-                        shortcuts.forEach { (label, url) ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(SurfaceVariantDark)
-                                    .border(1.dp, CyberCyan.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        viewModel.openWebUrlInApp(url)
-                                    }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = label,
-                                        color = CyberCyan,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.OpenInNew,
-                                        contentDescription = label,
-                                        tint = CyberCyan,
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                }
-                            }
                         }
                     }
                 }

@@ -273,6 +273,7 @@ object ClaudeReasoningEngine {
     ): ClaudeReasoningResult = withContext(Dispatchers.IO) {
         val apiKey = apiKeyOverride?.trim() ?: getApiKey()
         if (isPlaceholderKey(apiKey)) {
+            Log.d("ARC_CONN_DEBUG", "Claude Text/Voice Brain skipped -> ANTHROPIC_API_KEY missing/placeholder, falling back to Gemini")
             return@withContext ClaudeReasoningResult.FallbackRequired("ANTHROPIC_API_KEY missing or placeholder.")
         }
 
@@ -298,12 +299,15 @@ object ClaudeReasoningEngine {
         val payloadPrimary = buildRequestPayload(PRIMARY_CLAUDE_MODEL, systemPrompt, userTranscript)
         val transport = transportOverride ?: defaultTransport
 
+        Log.d("ARC_CONN_DEBUG", "Claude CONNECTION_ATTEMPT | model=$PRIMARY_CLAUDE_MODEL | keyLen=${apiKey.length}")
+
         try {
             var (statusCode, rawBody) = transport.postMessages(apiKey, payloadPrimary)
 
             // Retry once on fallback Claude Sonnet model ID if primary ID returns 404/model error
             if (statusCode == 404) {
                 Log.w(TAG, "Primary Claude model returned 404, retrying with $FALLBACK_CLAUDE_MODEL")
+                Log.w("ARC_CONN_DEBUG", "Claude retry with $FALLBACK_CLAUDE_MODEL after HTTP 404")
                 val payloadFallback = buildRequestPayload(FALLBACK_CLAUDE_MODEL, systemPrompt, userTranscript)
                 val retry = transport.postMessages(apiKey, payloadFallback)
                 statusCode = retry.first
@@ -312,8 +316,10 @@ object ClaudeReasoningEngine {
 
             if (statusCode !in 200..299 || rawBody.isBlank()) {
                 Log.w(TAG, "Anthropic API returned HTTP $statusCode: ${rawBody.take(200)}")
+                Log.e("ARC_CONN_DEBUG", "Claude CONNECTION_FAILURE | http=$statusCode | body=${rawBody.take(120)}")
                 return@withContext ClaudeReasoningResult.FallbackRequired("Anthropic HTTP $statusCode")
             }
+            Log.d("ARC_CONN_DEBUG", "Claude CONNECTION_SUCCESS | http=$statusCode | bodyChars=${rawBody.length}")
 
             val responseJson = JSONObject(rawBody)
             val contentArray = responseJson.optJSONArray("content") ?: JSONArray()

@@ -716,6 +716,7 @@ class AriaCommandProcessor(
         }
 
         // 7. Conversational & Multi-Step Reasoning Brain: Claude (Anthropic) primary -> Gemini API fallback
+        Log.d(GeminiClient.CONN_DEBUG_TAG, "Text/Voice Command Routing -> trying ClaudeReasoningEngine first for '${userQuery.take(40)}'")
         val claudeResult = ClaudeReasoningEngine.reasonAndExecute(
             context = context,
             userTranscript = userQuery,
@@ -723,14 +724,19 @@ class AriaCommandProcessor(
             executeTools = true
         )
         if (claudeResult is ClaudeReasoningResult.Success) {
+            Log.d(GeminiClient.CONN_DEBUG_TAG, "Text/Voice Command resolved via CLAUDE_BRAIN")
             saveHistory(userQuery, claudeResult.spokenResponse, "CLAUDE_BRAIN")
             return@withContext AriaCommandResult.TextResponse(claudeResult.spokenResponse, "CLAUDE_BRAIN")
         }
 
+        val fallbackReason = (claudeResult as? ClaudeReasoningResult.FallbackRequired)?.reason ?: "Unavailable"
+        Log.d(GeminiClient.CONN_DEBUG_TAG, "Claude fallback ($fallbackReason) -> routing to GeminiClient.queryAriaAiDetailed")
+
         // Seamless fallback to Gemini if Claude API key is missing or Anthropic endpoint fails
-        val aiReply = GeminiClient.queryAriaAi(userQuery)
-        saveHistory(userQuery, aiReply, "AI")
-        return@withContext AriaCommandResult.TextResponse(aiReply, "AI")
+        val aiResult = GeminiClient.queryAriaAiDetailed(userQuery)
+        val category = if (aiResult.isSuccess) "AI" else "AI_ERROR"
+        saveHistory(userQuery, aiResult.replyText, category)
+        return@withContext AriaCommandResult.TextResponse(aiResult.replyText, category)
     }
 
     private suspend fun saveHistory(query: String, response: String, category: String) {

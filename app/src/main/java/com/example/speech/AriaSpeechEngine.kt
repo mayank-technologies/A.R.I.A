@@ -51,6 +51,12 @@ enum class WakeWordState {
     UNAVAILABLE
 }
 
+data class SpeechErrorInfo(
+    val errorCode: Int,
+    val codeName: String,
+    val userMessage: String
+)
+
 /**
  * Advanced ARIA Speech Engine featuring:
  * 1. ElevenLabs Neural Human Voice Synthesis (Adam / Warm Deep Male Voice)
@@ -164,7 +170,11 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     private val _activeVoiceDebugInfo = MutableStateFlow("SpeechEngine: Initializing (ElevenLabs=$voiceId)")
     val activeVoiceDebugInfo: StateFlow<String> = _activeVoiceDebugInfo.asStateFlow()
 
+    private val _lastSpeechError = MutableStateFlow<SpeechErrorInfo?>(null)
+    val lastSpeechError: StateFlow<SpeechErrorInfo?> = _lastSpeechError.asStateFlow()
+
     private var onSpeechResultListener: ((String) -> Unit)? = null
+    private var onSpeechErrorListener: ((SpeechErrorInfo) -> Unit)? = null
     private var onWakeWordDetectedListener: ((WakeWordParseResult, String) -> Unit)? = null
     private var wakeWordJob: Job? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -179,7 +189,18 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     private var partialWakeMatchedInSession = false
 
     @Volatile
+    private var isIgnoringStaleCancelErrors = false
+
+    @Volatile
     private var lastMaleTtsSelection: MaleTtsSelection? = null
+
+    fun setOnSpeechErrorListener(listener: (SpeechErrorInfo) -> Unit) {
+        onSpeechErrorListener = listener
+    }
+
+    fun clearSpeechError() {
+        _lastSpeechError.value = null
+    }
 
     init {
         initSpeechRecognizer()
@@ -792,8 +813,10 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
     private fun createRecognitionListener(): RecognitionListener {
         return object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
+                Log.d(MIC_DEBUG_TAG, "onReadyForSpeech | isManualCommandListening=$isManualCommandListening")
                 if (isManualCommandListening) {
                     _isListening.value = true
+                    _lastSpeechError.value = null
                     if (_isWakeWordModeEnabled.value) {
                         _wakeWordState.value = WakeWordState.ACTIVE_COMMAND
                     }
@@ -803,7 +826,9 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
                 _micVolumeLevel.value = 0f
             }
 
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() {
+                Log.d(MIC_DEBUG_TAG, "onBeginningOfSpeech | isManual=$isManualCommandListening")
+            }
 
             override fun onRmsChanged(rmsdB: Float) {
                 val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
@@ -813,6 +838,7 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
             override fun onBufferReceived(buffer: ByteArray?) {}
 
             override fun onEndOfSpeech() {
+                Log.d(MIC_DEBUG_TAG, "onEndOfSpeech | isManual=$isManualCommandListening")
                 if (isManualCommandListening) {
                     _isListening.value = false
                 }
@@ -820,17 +846,36 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
             }
 
             override fun onError(error: Int) {
+                if (isIgnoringStaleCancelErrors && error == SpeechRecognizer.ERROR_CLIENT) {
+                    Log.d(MIC_DEBUG_TAG, "Ignoring stale ERROR_CLIENT from prior recognizer cancel()")
+                    return
+                }
+
                 _micVolumeLevel.value = 0f
                 val wasManual = isManualCommandListening
+                val errInfo = describeSpeechError(error)
+                Log.w(
+                    MIC_DEBUG_TAG,
+                    "onError code=$error (${errInfo.codeName}) | wasManual=$wasManual | msg=${errInfo.userMessage}"
+                )
+                println("[$MIC_DEBUG_TAG] onError code=$error (${errInfo.codeName}) | wasManual=$wasManual | msg=${errInfo.userMessage}")
+
                 isManualCommandListening = false
                 _isListening.value = false
 
                 if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                     _wakeWordState.value = WakeWordState.PERMISSION_REQUIRED
+                    _lastSpeechError.value = errInfo
+                    if (wasManual) {
+                        onSpeechErrorListener?.invoke(errInfo)
+                        onSpeechResultListener?.invoke("")
+                    }
                     return
                 }
 
                 if (wasManual) {
+                    _lastSpeechError.value = errInfo
+                    onSpeechErrorListener?.invoke(errInfo)
                     onSpeechResultListener?.invoke("")
                 }
 
@@ -970,11 +1015,48 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
      */
     fun startListening(onResult: (String) -> Unit) {
         this.onSpeechResultListener = onResult
-        if (!hasAudioPermission()) {
+        clearSpeechError()
+
+        val hasPerm = hasAudioPermission()
+        val recognizerAvailable = SpeechRecognizer.isRecognitionAvailable(context)
+        Log.d(
+            MIC_DEBUG_TAG,
+            "startListening called | hasAudioPermission=$hasPerm | recognizerAvailable=$recognizerAvailable | externalMicBusy=$isExternalMicBusy"
+        )
+        println("[$MIC_DEBUG_TAG] startListening | perm=$hasPerm | avail=$recognizerAvailable | externalBusy=$isExternalMicBusy")
+
+        if (!hasPerm) {
+            isManualCommandListening = false
             _isListening.value = false
             _wakeWordState.value = WakeWordState.PERMISSION_REQUIRED
+            val errInfo = SpeechErrorInfo(
+                errorCode = -1,
+                codeName = "PERMISSION_REQUIRED",
+                userMessage = "Microphone permission needed. Please grant Microphone access to talk to ARC."
+            )
+            _lastSpeechError.value = errInfo
+            Log.e(MIC_DEBUG_TAG, "Aborting startListening: ${errInfo.userMessage}")
+            onSpeechErrorListener?.invoke(errInfo)
+            onResult("")
             return
         }
+
+        if (!recognizerAvailable) {
+            isManualCommandListening = false
+            _isListening.value = false
+            _wakeWordState.value = WakeWordState.UNAVAILABLE
+            val errInfo = SpeechErrorInfo(
+                errorCode = -2,
+                codeName = "SERVICE_UNAVAILABLE",
+                userMessage = "Speech recognition service unavailable on this device. Use Text Chat or enable Google Speech Services."
+            )
+            _lastSpeechError.value = errInfo
+            Log.e(MIC_DEBUG_TAG, "Aborting startListening: ${errInfo.userMessage}")
+            onSpeechErrorListener?.invoke(errInfo)
+            onResult("")
+            return
+        }
+
         wakeWordJob?.cancel()
         isManualCommandListening = true
         partialWakeMatchedInSession = false
@@ -986,29 +1068,36 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
         }
 
         val startBlock = {
-            if (SpeechRecognizer.isRecognitionAvailable(context)) {
-                if (speechRecognizer == null) {
-                    initSpeechRecognizer()
-                }
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for ARC command...")
-                }
-                try {
-                    speechRecognizer?.cancel()
-                    speechRecognizer?.startListening(intent)
-                } catch (e: Exception) {
-                    isManualCommandListening = false
-                    _isListening.value = false
-                    _micVolumeLevel.value = 0f
-                    Log.e("AriaSpeechEngine", "Error starting speech recognition: ${e.message}")
-                }
-            } else {
+            if (speechRecognizer == null) {
+                initSpeechRecognizer()
+            }
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2200L)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Listening for ARC command...")
+            }
+            try {
+                isIgnoringStaleCancelErrors = true
+                speechRecognizer?.cancel()
+                isIgnoringStaleCancelErrors = false
+                speechRecognizer?.startListening(intent)
+                Log.d(MIC_DEBUG_TAG, "SpeechRecognizer.startListening() dispatched cleanly")
+            } catch (e: Exception) {
+                isIgnoringStaleCancelErrors = false
                 isManualCommandListening = false
                 _isListening.value = false
-                _wakeWordState.value = WakeWordState.UNAVAILABLE
+                _micVolumeLevel.value = 0f
+                val errInfo = SpeechErrorInfo(
+                    errorCode = -3,
+                    codeName = "START_EXCEPTION",
+                    userMessage = "Microphone could not start (${e.localizedMessage ?: "Audio hardware error"})."
+                )
+                _lastSpeechError.value = errInfo
+                Log.e(MIC_DEBUG_TAG, "Exception starting SpeechRecognizer: ${e.message}", e)
+                onSpeechErrorListener?.invoke(errInfo)
+                onResult("")
             }
         }
 
@@ -1073,7 +1162,59 @@ class AriaSpeechEngine(private val context: Context) : TextToSpeech.OnInitListen
 
     companion object {
         const val VOICE_DEBUG_TAG = "ARC_VOICE_DEBUG"
+        const val MIC_DEBUG_TAG = "ARC_MIC_DEBUG"
         const val DEFAULT_MALE_VOICE_ID = "pNInz6obpgDQGcFmaJgB" // Adam (Male)
+
+        fun describeSpeechError(errorCode: Int): SpeechErrorInfo {
+            return when (errorCode) {
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> SpeechErrorInfo(
+                    errorCode = errorCode,
+                    codeName = "ERROR_INSUFFICIENT_PERMISSIONS",
+                    userMessage = "Microphone permission needed. Please grant Microphone permission."
+                )
+                SpeechRecognizer.ERROR_AUDIO -> SpeechErrorInfo(
+                    errorCode = errorCode,
+                    codeName = "ERROR_AUDIO",
+                    userMessage = "Microphone audio error. Close other recording apps and tap mic again."
+                )
+                SpeechRecognizer.ERROR_NETWORK,
+                SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> SpeechErrorInfo(
+                    errorCode = errorCode,
+                    codeName = "ERROR_NETWORK",
+                    userMessage = "Voice connection failed, check internet connection."
+                )
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> SpeechErrorInfo(
+                    errorCode = errorCode,
+                    codeName = "ERROR_RECOGNIZER_BUSY",
+                    userMessage = "Microphone busy. Wait a moment and tap mic again."
+                )
+                SpeechRecognizer.ERROR_CLIENT -> SpeechErrorInfo(
+                    errorCode = errorCode,
+                    codeName = "ERROR_CLIENT",
+                    userMessage = "Microphone session interrupted. Tap mic again."
+                )
+                SpeechRecognizer.ERROR_SERVER -> SpeechErrorInfo(
+                    errorCode = errorCode,
+                    codeName = "ERROR_SERVER",
+                    userMessage = "Voice recognition server error, check internet."
+                )
+                SpeechRecognizer.ERROR_NO_MATCH -> SpeechErrorInfo(
+                    errorCode = errorCode,
+                    codeName = "ERROR_NO_MATCH",
+                    userMessage = "Didn't hear speech clearly. Tap mic and speak again."
+                )
+                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> SpeechErrorInfo(
+                    errorCode = errorCode,
+                    codeName = "ERROR_SPEECH_TIMEOUT",
+                    userMessage = "No speech heard. Tap mic and speak right away."
+                )
+                else -> SpeechErrorInfo(
+                    errorCode = errorCode,
+                    codeName = "ERROR_UNKNOWN_$errorCode",
+                    userMessage = "Microphone error ($errorCode). Please try again."
+                )
+            }
+        }
 
         data class MaleTtsSelection(
             val voiceName: String,

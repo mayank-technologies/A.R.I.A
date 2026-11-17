@@ -9,6 +9,7 @@ import android.media.MediaRecorder
 import android.util.Base64
 import android.util.Log
 import com.example.BuildConfig
+import com.example.api.GeminiClient
 import com.example.assistant.DeviceClockHelper
 import com.example.claude.ClaudeReasoningEngine
 import com.example.speech.SpeechWaveformAnalyzer
@@ -67,6 +68,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
     companion object {
         private const val TAG = "GEMINI_LIVE_VOICE"
         private const val VOICE_DEBUG_TAG = "ARC_VOICE_DEBUG"
+        const val CONN_DEBUG_TAG = "ARC_CONN_DEBUG"
         private const val HOST = "generativelanguage.googleapis.com"
         private const val PATH = "/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
 
@@ -146,6 +148,9 @@ class GeminiLiveVoiceManager(private val context: Context) {
     @Volatile
     private var isSetupComplete = false
 
+    @Volatile
+    private var isMicPausedForRecognizer = false
+
     // 0 = Primary Native Audio + Affective + Proactivity, 1 = Primary Native Audio + Affective (no proactivity), 2 = Fallback model (limited expressiveness)
     @Volatile
     private var handshakeTier = 0
@@ -163,15 +168,18 @@ class GeminiLiveVoiceManager(private val context: Context) {
     }
 
     fun hasValidApiKey(): Boolean {
-        val apiKey = BuildConfig.GEMINI_API_KEY.trim()
-        return apiKey.isNotBlank() &&
-            !apiKey.equals("MY_GEMINI_API_KEY", ignoreCase = true) &&
-            !apiKey.equals("your_key_here", ignoreCase = true) &&
-            !apiKey.startsWith("YOUR_", ignoreCase = true)
+        return GeminiClient.inspectApiKey("GEMINI_API_KEY", BuildConfig.GEMINI_API_KEY).isValid
     }
 
     private val _sessionState = MutableStateFlow(GeminiLiveSessionState.DISCONNECTED)
     val sessionState: StateFlow<GeminiLiveSessionState> = _sessionState.asStateFlow()
+
+    private val _connectionError = MutableStateFlow<String?>(null)
+    val connectionError: StateFlow<String?> = _connectionError.asStateFlow()
+
+    fun clearConnectionError() {
+        _connectionError.value = null
+    }
 
     private val _liveTranscript = MutableStateFlow("")
     val liveTranscript: StateFlow<String> = _liveTranscript.asStateFlow()
@@ -218,6 +226,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
      * Initializes and starts a Gemini Live Voice streaming session.
      */
     fun startLiveSession() {
+        val keyAudit = GeminiClient.inspectApiKey("GEMINI_API_KEY", BuildConfig.GEMINI_API_KEY)
+        Log.d(
+            CONN_DEBUG_TAG,
+            "GeminiLive CONNECTION_ATTEMPT | host=$HOST | model=$LIVE_MODEL | key=${keyAudit.statusLabel}"
+        )
+        println("[$CONN_DEBUG_TAG] GeminiLive CONNECTION_ATTEMPT | key=${keyAudit.statusLabel}")
+
         if (_sessionState.value == GeminiLiveSessionState.CONNECTED ||
             _sessionState.value == GeminiLiveSessionState.CONNECTING ||
             _sessionState.value == GeminiLiveSessionState.LISTENING ||
@@ -227,16 +242,21 @@ class GeminiLiveVoiceManager(private val context: Context) {
             return
         }
 
-        if (!hasValidApiKey()) {
-            val info = "Engine=FALLBACK_TTS | Reason=GEMINI_API_KEY missing or placeholder ('${BuildConfig.GEMINI_API_KEY.take(12)}')"
+        if (!keyAudit.isValid) {
+            val userErr = "Voice connection failed: GEMINI_API_KEY missing or placeholder (${keyAudit.statusLabel}). Configure GEMINI_API_KEY in Secrets."
+            val info = "Engine=FALLBACK_TTS | Reason=GEMINI_API_KEY ${keyAudit.statusLabel}"
+            Log.e(CONN_DEBUG_TAG, "GeminiLive CONNECTION_FAILURE | $userErr")
+            println("[$CONN_DEBUG_TAG] GeminiLive CONNECTION_FAILURE | $userErr")
             Log.e(VOICE_DEBUG_TAG, info)
             _activeVoiceDebugInfo.value = info
+            _connectionError.value = userErr
             _sessionState.value = GeminiLiveSessionState.ERROR
-            _liveTranscript.value = "Gemini API Key missing. Using male fallback TTS."
+            _liveTranscript.value = userErr
             drainPendingToFallback()
             return
         }
 
+        _connectionError.value = null
         handshakeTier = 0
         isSetupComplete = false
         _isAffectiveDialogActive.value = false
@@ -261,10 +281,16 @@ class GeminiLiveVoiceManager(private val context: Context) {
         setupWatchdogJob?.cancel()
         webSocket?.cancel()
 
+        Log.d(CONN_DEBUG_TAG, "GeminiLive WebSocket opening (tier=$handshakeTier, fallbackModel=$usingFallbackModel)")
+
         val socket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
-                Log.d(TAG, "Gemini Live WebSocket Opened (tier=$handshakeTier, fallbackModel=$usingFallbackModel)")
+                Log.d(
+                    CONN_DEBUG_TAG,
+                    "GeminiLive WebSocket onOpen HTTP=${response.code} (tier=$handshakeTier, fallbackModel=$usingFallbackModel)"
+                )
+                println("[$CONN_DEBUG_TAG] GeminiLive WebSocket onOpen (tier=$handshakeTier)")
                 _sessionState.value = GeminiLiveSessionState.CONNECTED
                 sendInitialHandshakeSetup(
                     ws = webSocket,
@@ -285,7 +311,15 @@ class GeminiLiveVoiceManager(private val context: Context) {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
-                Log.e(TAG, "Gemini Live WebSocket Error: ${t.message}", t)
+                val httpCode = response?.code
+                val errBody = try { response?.body?.string()?.take(200) } catch (_: Exception) { null }
+                Log.e(
+                    CONN_DEBUG_TAG,
+                    "GeminiLive CONNECTION_FAILURE | tier=$handshakeTier | httpCode=$httpCode | error=${t.javaClass.simpleName}:${t.message} | body=$errBody",
+                    t
+                )
+                println("[$CONN_DEBUG_TAG] GeminiLive CONNECTION_FAILURE | tier=$handshakeTier | httpCode=$httpCode | msg=${t.message}")
+
                 if (!isSetupComplete && handshakeTier < 2) {
                     handshakeTier++
                     Log.w(
@@ -295,19 +329,29 @@ class GeminiLiveVoiceManager(private val context: Context) {
                     openWebSocketConnection()
                     return
                 }
-                val info = "Engine=FALLBACK_TTS | Reason=Gemini Live WebSocket error (${t.message})"
+                val readableError = if (httpCode in listOf(400, 401, 403)) {
+                    "Voice connection rejected (HTTP $httpCode). Check GEMINI_API_KEY in Secrets."
+                } else {
+                    "Voice connection failed, check internet (${t.localizedMessage ?: "Network error"})."
+                }
+                val info = "Engine=FALLBACK_TTS | Reason=Gemini Live WebSocket error (http=$httpCode, ${t.message})"
                 Log.w(VOICE_DEBUG_TAG, info)
                 _isAffectiveDialogActive.value = false
                 _activeVoiceDebugInfo.value = info
+                _connectionError.value = readableError
                 _sessionState.value = GeminiLiveSessionState.ERROR
-                _liveTranscript.value = "Live Voice disconnected: ${t.localizedMessage ?: "Network error"}"
+                _liveTranscript.value = readableError
                 drainPendingToFallback()
                 releaseAudioHardware()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (this@GeminiLiveVoiceManager.webSocket !== webSocket) return
-                Log.d(TAG, "Gemini Live WebSocket closed ($code: $reason)")
+                Log.d(
+                    CONN_DEBUG_TAG,
+                    "GeminiLive CONNECTION_CLOSED | code=$code | reason='$reason' | setupComplete=$isSetupComplete | tier=$handshakeTier"
+                )
+                println("[$CONN_DEBUG_TAG] GeminiLive CONNECTION_CLOSED | code=$code | reason='$reason' | setupComplete=$isSetupComplete")
                 if (!isSetupComplete && handshakeTier < 2 && code != 1000) {
                     handshakeTier++
                     Log.w(
@@ -316,6 +360,9 @@ class GeminiLiveVoiceManager(private val context: Context) {
                     )
                     openWebSocketConnection()
                     return
+                }
+                if (!isSetupComplete && code != 1000) {
+                    _connectionError.value = "Voice connection failed ($code): ${reason.ifBlank { "Check GEMINI_API_KEY or network" }}."
                 }
                 val info = "Engine=FALLBACK_TTS | Reason=Gemini Live closed ($code: $reason)"
                 Log.w(VOICE_DEBUG_TAG, info)
@@ -333,7 +380,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
         setupWatchdogJob = scope.launch {
             kotlinx.coroutines.delay(4500L)
             if (!isSetupComplete) {
-                Log.w(VOICE_DEBUG_TAG, "Gemini Live setupComplete timeout (>4.5s) -> draining pending turns to male fallback TTS")
+                Log.w(CONN_DEBUG_TAG, "GeminiLive setupComplete timeout (>4.5s) -> draining pending turns to male fallback TTS")
                 drainPendingToFallback()
             }
         }
@@ -573,9 +620,24 @@ class GeminiLiveVoiceManager(private val context: Context) {
         try {
             val root = JSONObject(jsonString)
 
+            // Server error payload check (never silently ignore API errors)
+            val serverError = root.optJSONObject("error")
+            if (serverError != null) {
+                val errCode = serverError.optInt("code", -1)
+                val errStatus = serverError.optString("status", "ERROR")
+                val errMessage = serverError.optString("message", "Unknown Gemini Live error")
+                Log.e(CONN_DEBUG_TAG, "GeminiLive SERVER_ERROR | code=$errCode | status=$errStatus | msg=$errMessage")
+                println("[$CONN_DEBUG_TAG] GeminiLive SERVER_ERROR | code=$errCode | msg=$errMessage")
+                _connectionError.value = "Gemini Live error ($errCode): $errMessage"
+                _sessionState.value = GeminiLiveSessionState.ERROR
+                drainPendingToFallback()
+                return
+            }
+
             // 0. Server setupComplete acknowledgment -> start mic streaming & flush queued speech
             if (root.has("setupComplete")) {
                 isSetupComplete = true
+                _connectionError.value = null
                 val modelUsed = if (usingFallbackModel) FALLBACK_LIVE_MODEL else LIVE_MODEL
                 val affectiveActive = !usingFallbackModel
                 _isAffectiveDialogActive.value = affectiveActive
@@ -586,7 +648,11 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 }
                 _activeVoiceDebugInfo.value = info
                 Log.d(VOICE_DEBUG_TAG, info)
-                startMicStreaming(ws)
+                Log.d(CONN_DEBUG_TAG, "GeminiLive CONNECTION_SUCCESS | $info")
+                println("[$CONN_DEBUG_TAG] GeminiLive CONNECTION_SUCCESS | $info")
+                if (!isMicPausedForRecognizer) {
+                    startMicStreaming(ws)
+                }
                 val queued: List<String>
                 synchronized(pendingSpeechTurns) {
                     queued = pendingSpeechTurns.toList()
@@ -887,6 +953,37 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 _sessionState.value = GeminiLiveSessionState.LISTENING
             }
         } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Temporarily releases AudioRecord so Android SpeechRecognizer can capture mic audio
+     * cleanly without hitting ERROR_AUDIO or ERROR_RECOGNIZER_BUSY.
+     */
+    fun pauseMicForExternalRecognizer() {
+        isMicPausedForRecognizer = true
+        try {
+            recordJob?.cancel()
+            recordJob = null
+            audioRecord?.stop()
+            audioRecord?.release()
+            audioRecord = null
+            _micVolumeLevel.value = 0f
+            Log.d(CONN_DEBUG_TAG, "GeminiLive AudioRecord paused cleanly for SpeechRecognizer")
+        } catch (e: Exception) {
+            Log.w(CONN_DEBUG_TAG, "Error pausing GeminiLive AudioRecord: ${e.message}")
+        }
+    }
+
+    /**
+     * Resumes Gemini Live AudioRecord streaming after external SpeechRecognizer finishes.
+     */
+    fun resumeMicIfConnected() {
+        isMicPausedForRecognizer = false
+        val ws = webSocket
+        if (ws != null && isSetupComplete && isStreamActive() && audioRecord == null) {
+            Log.d(CONN_DEBUG_TAG, "GeminiLive AudioRecord resuming after SpeechRecognizer")
+            startMicStreaming(ws)
         }
     }
 

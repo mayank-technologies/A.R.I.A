@@ -145,6 +145,28 @@ jobs:
           fi
           echo "Verified ./debug.keystore exists."
 
+      # Populate .env from GitHub Repository Secrets so Secrets Gradle Plugin injects real keys into BuildConfig
+      - name: Inject API keys into .env from GitHub Secrets
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+        run: |
+          {
+            echo "GEMINI_API_KEY=${GEMINI_API_KEY:-your_key_here}"
+            echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-your_key_here}"
+            echo "ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-your_key_here}"
+            echo "ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-pNInz6obpgDQGcFmaJgB}"
+          } > .env
+
+          # Masked audit (never prints raw secret values)
+          if [ -n "$GEMINI_API_KEY" ] && [ "$GEMINI_API_KEY" != "your_key_here" ]; then
+            echo "Build Audit: GEMINI_API_KEY loaded into .env (length=${#GEMINI_API_KEY})."
+          else
+            echo "::warning::GEMINI_API_KEY GitHub Secret is empty or placeholder! Voice/Chat will show missing-key error at runtime."
+          fi
+
       - name: Build debug APK
         id: build_apk
         run: gradle :app:assembleDebug --stacktrace --no-daemon

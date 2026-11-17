@@ -280,6 +280,7 @@ fun VoiceHudScreen(
     val speechOutputLevel by viewModel.speechOutputLevel.collectAsState()
     val speechOutputBands by viewModel.speechOutputBands.collectAsState()
     val activeVoiceDebugInfo by viewModel.activeVoiceDebugInfo.collectAsState()
+    val uiErrorMessage by viewModel.uiErrorMessage.collectAsState()
 
     val isBatterySaverActive by AriaBatterySaverManager.isBatterySaverActive.collectAsState()
     val batteryLevel by AriaBatterySaverManager.batteryLevel.collectAsState()
@@ -289,6 +290,7 @@ fun VoiceHudScreen(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     var hasPromptedLocationOnce by remember { mutableStateOf(false) }
+    var pendingMicStartAfterPermission by remember { mutableStateOf(false) }
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
@@ -297,7 +299,9 @@ fun VoiceHudScreen(
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ ->
-        viewModel.onMicPermissionUpdated()
+        val shouldStart = pendingMicStartAfterPermission
+        pendingMicStartAfterPermission = false
+        viewModel.onMicPermissionUpdated(startListeningIfGranted = shouldStart)
     }
 
     LaunchedEffect(wakeWordState, wakeFlashActive) {
@@ -510,6 +514,7 @@ fun VoiceHudScreen(
                             .size(avatarSize)
                             .clickable {
                                 if (needsMicPermission) {
+                                    pendingMicStartAfterPermission = true
                                     micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 } else {
                                     viewModel.activateArcWithGreeting()
@@ -647,6 +652,45 @@ fun VoiceHudScreen(
                             )
                         }
                     }
+                    // Non-silent error feedback banner (Mic permission denied, recognizer error, API key / network failure)
+                    AnimatedVisibility(
+                        visible = !uiErrorMessage.isNullOrBlank(),
+                        enter = fadeIn(tween(150)),
+                        exit = fadeOut(tween(180))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(top = 6.dp)
+                                .fillMaxWidth()
+                                .widthIn(max = 380.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(WarningAmber.copy(alpha = 0.14f))
+                                .border(1.dp, WarningAmber.copy(alpha = 0.65f), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .testTag("hud_error_banner"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = uiErrorMessage.orEmpty(),
+                                color = WarningAmber,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = { viewModel.dismissErrorMessage() },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss Error",
+                                    tint = WarningAmber,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // -------------------------------------------------------------
@@ -750,6 +794,7 @@ fun VoiceHudScreen(
                     onScreenVisionClick = { viewModel.submitTextCommand("read screen") },
                     onMicClick = {
                         if (needsMicPermission) {
+                            pendingMicStartAfterPermission = true
                             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         } else {
                             viewModel.activateArcWithGreeting()
@@ -819,6 +864,26 @@ fun VoiceHudScreen(
                     }
                 }
 
+                // Visible Chat Error Alert if backend / API key failed
+                if (!uiErrorMessage.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(WarningAmber.copy(alpha = 0.14f))
+                            .border(1.dp, WarningAmber.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                            .padding(10.dp)
+                            .testTag("chat_error_banner")
+                    ) {
+                        Text(
+                            text = uiErrorMessage.orEmpty(),
+                            color = WarningAmber,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+
                 // Latest Response Highlight Box
                 Box(
                     modifier = Modifier
@@ -838,8 +903,12 @@ fun VoiceHudScreen(
                             )
                         }
                         Text(
-                            text = latestResponse,
-                            color = TextPrimary,
+                            text = if (assistantStatus == AssistantStatus.PROCESSING) {
+                                "Thinking / connecting to AI..."
+                            } else {
+                                latestResponse
+                            },
+                            color = if (assistantStatus == AssistantStatus.PROCESSING) ElectricCyan else TextPrimary,
                             fontSize = 13.sp,
                             lineHeight = 19.sp
                         )

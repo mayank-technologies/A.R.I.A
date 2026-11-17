@@ -1,5 +1,6 @@
 package com.example
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.assertIsDisplayed
@@ -64,22 +65,26 @@ class SpeechAudioVisualizerTest {
 
         composeTestRule.setContent {
             AriaTheme {
-                ParticleAvatar3D(
-                    status = AssistantStatus.SPEAKING,
-                    speechVolume = 0.72f,
-                    disableAnimations = true
-                )
-                SpeechAudioVisualizer(
-                    isSpeaking = true,
-                    audioLevel = 0.72f,
-                    audioBands = sampleBands,
-                    disableAnimations = true
-                )
+                Column {
+                    ParticleAvatar3D(
+                        status = AssistantStatus.SPEAKING,
+                        speechVolume = 0.72f,
+                        disableAnimations = true,
+                        modifier = androidx.compose.ui.Modifier.size(160.dp)
+                    )
+                    SpeechAudioVisualizer(
+                        isSpeaking = true,
+                        audioLevel = 0.72f,
+                        audioBands = sampleBands,
+                        disableAnimations = true
+                    )
+                }
             }
         }
 
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("speech_audio_visualizer")
             .assertIsDisplayed()
-            .assertContentDescriptionContains("72 percent amplitude")
+            .assertContentDescriptionContains("72 percent amplitude", substring = true)
     }
 }

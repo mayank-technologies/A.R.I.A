@@ -75,11 +75,12 @@ fun SpeechAudioVisualizer(
     val clampedLevel = audioLevel.coerceIn(0f, 1f)
     val targetLevel = if (isSpeaking) clampedLevel.coerceAtLeast(0.14f) else 0f
 
-    val smoothedLevel by animateFloatAsState(
+    val animatedLevel by animateFloatAsState(
         targetValue = targetLevel,
         animationSpec = tween(durationMillis = 75, easing = FastOutSlowInEasing),
         label = "speech_vis_level"
     )
+    val smoothedLevel = if (disableAnimations) targetLevel else animatedLevel
 
     val phase: Float = if (isSpeaking && !disableAnimations) {
         val infiniteTransition = rememberInfiniteTransition(label = "speech_vis_phase")
@@ -114,7 +115,7 @@ fun SpeechAudioVisualizer(
     val mirrorWavePath = remember { Path() }
 
     val activeBorderColor = if (isSpeaking) accentColor.copy(alpha = 0.45f) else secondaryColor.copy(alpha = 0.18f)
-    val energyPct = (smoothedLevel * 100f).toInt().coerceIn(0, 100)
+    val energyPct = kotlin.math.round(smoothedLevel * 100f).toInt().coerceIn(0, 100)
 
     Column(
         modifier = modifier
