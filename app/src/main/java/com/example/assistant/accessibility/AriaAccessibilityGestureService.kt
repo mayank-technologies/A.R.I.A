@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import android.view.Display
@@ -175,6 +176,45 @@ class AriaAccessibilityGestureService : AccessibilityService() {
                     }
                 }
             } ?: GestureResult.Failure("'$buttonLabel' button tap timeout ho gaya.")
+        }
+
+        fun fillFormFields(
+            profile: PersonalProfileInfo,
+            callback: (FormFillResult) -> Unit
+        ) {
+            if (!profile.hasAnyField()) {
+                callback(
+                    FormFillResult(
+                        success = false,
+                        message = "Personal Info empty hai. Pehle Settings > Personal Info me Name, Email, Phone ya Address save karein."
+                    )
+                )
+                return
+            }
+            val service = instance
+            if (service == null) {
+                callback(
+                    FormFillResult(
+                        success = false,
+                        message = "Accessibility Service off hai. Form fill karne ke liye Settings me ARC Accessibility ON kijiye."
+                    )
+                )
+                return
+            }
+            service.fillActiveFormFields(profile, callback)
+        }
+
+        suspend fun fillFormFieldsSuspend(profile: PersonalProfileInfo): FormFillResult {
+            return withTimeoutOrNull(6000L) {
+                suspendCancellableCoroutine { cont ->
+                    fillFormFields(profile) { result ->
+                        if (cont.isActive) cont.resume(result)
+                    }
+                }
+            } ?: FormFillResult(
+                success = false,
+                message = "Form auto-fill timeout ho gaya, Boss."
+            )
         }
     }
 
@@ -609,5 +649,155 @@ class AriaAccessibilityGestureService : AccessibilityService() {
         for (i in 0 until node.childCount) {
             findMatchingNodesRecursive(node.getChild(i), queryLower, results)
         }
+    }
+
+    /**
+     * Scans visible editable AccessibilityNodeInfo nodes in the active window, classifies each field
+     * conservatively (Name, Email, Phone, Address), skips password/sensitive/ambiguous inputs,
+     * focuses the field, and populates text safely via ACTION_SET_TEXT.
+     */
+    private fun fillActiveFormFields(
+        profile: PersonalProfileInfo,
+        callback: (FormFillResult) -> Unit
+    ) {
+        val rootNode = rootInActiveWindow
+        if (rootNode == null) {
+            callback(
+                FormFillResult(
+                    success = false,
+                    message = "Active screen/form detect nahi ho rahi hai. Form khol kar dubara try karein."
+                )
+            )
+            return
+        }
+
+        val editableNodes = mutableListOf<AccessibilityNodeInfo>()
+        collectEditableNodes(rootNode, editableNodes)
+
+        if (editableNodes.isEmpty()) {
+            @Suppress("DEPRECATION")
+            rootNode.recycle()
+            callback(
+                FormFillResult(
+                    success = false,
+                    message = "Current screen par koi editable form field nahi mila."
+                )
+            )
+            return
+        }
+
+        val filledFields = mutableListOf<String>()
+        var skippedCount = 0
+
+        for (node in editableNodes) {
+            val nearbyLabel = findNearbyLabelText(node)
+            val fieldType = PersonalProfileManager.classifyFormField(
+                hintText = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) node.hintText?.toString() else null,
+                contentDesc = node.contentDescription?.toString(),
+                viewIdName = node.viewIdResourceName,
+                nearbyLabel = nearbyLabel,
+                inputType = node.inputType,
+                isPassword = node.isPassword
+            )
+
+            if (fieldType == FormFieldType.PASSWORD_OR_SENSITIVE || fieldType == FormFieldType.UNKNOWN) {
+                skippedCount++
+                continue
+            }
+
+            val valueToFill = PersonalProfileManager.valueForField(profile, fieldType)
+            if (valueToFill.isBlank()) {
+                skippedCount++
+                continue
+            }
+
+            var focused = node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            if (!focused && node.isClickable) {
+                focused = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
+            if (!focused && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                val bounds = Rect()
+                node.getBoundsInScreen(bounds)
+                if (!bounds.isEmpty) {
+                    val tapPath = Path().apply { moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat()) }
+                    val gesture = GestureDescription.Builder()
+                        .addStroke(GestureDescription.StrokeDescription(tapPath, 0, 35))
+                        .build()
+                    dispatchGesture(gesture, null, null)
+                }
+            }
+
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, valueToFill)
+            }
+            val setOk = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            if (setOk) {
+                val label = when (fieldType) {
+                    FormFieldType.NAME -> "Name"
+                    FormFieldType.EMAIL -> "Email"
+                    FormFieldType.PHONE -> "Phone"
+                    FormFieldType.ADDRESS -> "Address"
+                    else -> fieldType.name
+                }
+                filledFields.add(label)
+            } else {
+                skippedCount++
+            }
+        }
+
+        @Suppress("DEPRECATION")
+        rootNode.recycle()
+
+        if (filledFields.isNotEmpty()) {
+            val summary = filledFields.distinct().joinToString(", ")
+            val skippedNote = if (skippedCount > 0) " ($skippedCount password/unknown fields safely skip kiye)" else ""
+            callback(
+                FormFillResult(
+                    success = true,
+                    filledFields = filledFields,
+                    skippedCount = skippedCount,
+                    message = "Form auto-fill complete! Filled: $summary$skippedNote."
+                )
+            )
+        } else {
+            callback(
+                FormFillResult(
+                    success = false,
+                    filledFields = emptyList(),
+                    skippedCount = skippedCount,
+                    message = "Koi matching form field fill nahi hua ($skippedCount sensitive ya unknown fields skip kiye gaye)."
+                )
+            )
+        }
+    }
+
+    private fun collectEditableNodes(
+        node: AccessibilityNodeInfo?,
+        results: MutableList<AccessibilityNodeInfo>
+    ) {
+        if (node == null) return
+        if (node.isEditable && node.isEnabled) {
+            results.add(node)
+        }
+        for (i in 0 until node.childCount) {
+            collectEditableNodes(node.getChild(i), results)
+        }
+    }
+
+    private fun findNearbyLabelText(node: AccessibilityNodeInfo): String? {
+        val parent = node.parent ?: return null
+        val labels = mutableListOf<String>()
+        for (i in 0 until parent.childCount) {
+            val sibling = parent.getChild(i) ?: continue
+            if (sibling != node && !sibling.isEditable) {
+                val txt = sibling.text?.toString()?.trim()
+                if (!txt.isNullOrBlank()) labels.add(txt)
+            }
+            @Suppress("DEPRECATION")
+            sibling.recycle()
+        }
+        @Suppress("DEPRECATION")
+        parent.recycle()
+        return labels.joinToString(" ").takeIf { it.isNotBlank() }
     }
 }

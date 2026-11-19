@@ -70,10 +70,12 @@ fun SpeechAudioVisualizer(
     accentColor: Color = ElectricCyan,
     secondaryColor: Color = HologramBlue,
     highlightColor: Color = ElectricEmerald,
-    disableAnimations: Boolean = false
+    disableAnimations: Boolean = false,
+    isListening: Boolean = false
 ) {
+    val isActive = isSpeaking || isListening
     val clampedLevel = audioLevel.coerceIn(0f, 1f)
-    val targetLevel = if (isSpeaking) clampedLevel.coerceAtLeast(0.14f) else 0f
+    val targetLevel = if (isActive) clampedLevel.coerceAtLeast(if (isSpeaking) 0.14f else 0.16f) else 0f
 
     val animatedLevel by animateFloatAsState(
         targetValue = targetLevel,
@@ -82,13 +84,13 @@ fun SpeechAudioVisualizer(
     )
     val smoothedLevel = if (disableAnimations) targetLevel else animatedLevel
 
-    val phase: Float = if (isSpeaking && !disableAnimations) {
+    val phase: Float = if (isActive && !disableAnimations) {
         val infiniteTransition = rememberInfiniteTransition(label = "speech_vis_phase")
         val animPhase by infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = (2f * PI).toFloat(),
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1200, easing = LinearEasing),
+                animation = tween(durationMillis = if (isSpeaking) 1200 else 950, easing = LinearEasing),
                 repeatMode = RepeatMode.Restart
             ),
             label = "oscilloscope_phase"
@@ -98,15 +100,22 @@ fun SpeechAudioVisualizer(
         0f
     }
 
-    val normalizedBands = remember(audioBands, isSpeaking, clampedLevel) {
+    val normalizedBands = remember(audioBands, isActive, isSpeaking, isListening, clampedLevel) {
         val count = SpeechWaveformAnalyzer.DEFAULT_BAND_COUNT
         List(count) { idx ->
             val raw = audioBands.getOrElse(idx) { 0f }.coerceIn(0f, 1f)
-            if (isSpeaking) {
-                val floor = 0.08f + 0.08f * sin(PI * idx / (count - 1).coerceAtLeast(1)).toFloat()
-                maxOf(raw, floor * (0.5f + clampedLevel))
-            } else {
-                raw * 0.25f
+            when {
+                isSpeaking -> {
+                    val floor = 0.08f + 0.08f * sin(PI * idx / (count - 1).coerceAtLeast(1)).toFloat()
+                    maxOf(raw, floor * (0.5f + clampedLevel))
+                }
+                isListening -> {
+                    val centerArch = sin(PI * idx / (count - 1).coerceAtLeast(1)).toFloat()
+                    val reactive = (0.14f + centerArch * 0.42f + clampedLevel * (0.48f + 0.34f * centerArch))
+                        .coerceIn(0.10f, 1f)
+                    maxOf(raw, reactive)
+                }
+                else -> raw * 0.25f
             }
         }
     }
@@ -114,7 +123,21 @@ fun SpeechAudioVisualizer(
     val primaryWavePath = remember { Path() }
     val mirrorWavePath = remember { Path() }
 
-    val activeBorderColor = if (isSpeaking) accentColor.copy(alpha = 0.45f) else secondaryColor.copy(alpha = 0.18f)
+    val statusDotColor = when {
+        isSpeaking -> highlightColor
+        isListening -> accentColor
+        else -> TextMuted
+    }
+    val statusLabel = when {
+        isSpeaking -> "AUDIO OUTPUT · SYNCED"
+        isListening -> "VOICE INPUT · LISTENING"
+        else -> "AUDIO BUS · STANDBY"
+    }
+    val activeBorderColor = when {
+        isSpeaking -> highlightColor.copy(alpha = 0.45f)
+        isListening -> accentColor.copy(alpha = 0.50f)
+        else -> secondaryColor.copy(alpha = 0.18f)
+    }
     val energyPct = kotlin.math.round(smoothedLevel * 100f).toInt().coerceIn(0, 100)
 
     Column(
@@ -126,10 +149,10 @@ fun SpeechAudioVisualizer(
             .border(1.dp, activeBorderColor, RoundedCornerShape(16.dp))
             .padding(horizontal = 12.dp, vertical = 7.dp)
             .semantics {
-                contentDescription = if (isSpeaking) {
-                    "ARC speech output audio visualizer active at $energyPct percent amplitude"
-                } else {
-                    "ARC speech output audio visualizer standby"
+                contentDescription = when {
+                    isSpeaking -> "ARC speech output audio visualizer active at $energyPct percent amplitude"
+                    isListening -> "ARC voice input waveform active at $energyPct percent amplitude"
+                    else -> "ARC speech output audio visualizer standby"
                 }
             }
             .testTag("speech_audio_visualizer"),
@@ -149,11 +172,11 @@ fun SpeechAudioVisualizer(
                     modifier = Modifier
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(if (isSpeaking) highlightColor else TextMuted)
+                        .background(statusDotColor)
                 )
                 Text(
-                    text = if (isSpeaking) "AUDIO OUTPUT · SYNCED" else "AUDIO BUS · STANDBY",
-                    color = if (isSpeaking) accentColor else TextMuted,
+                    text = statusLabel,
+                    color = if (isActive) accentColor else TextMuted,
                     fontSize = 8.5.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
@@ -161,8 +184,8 @@ fun SpeechAudioVisualizer(
                 )
             }
             Text(
-                text = if (isSpeaking) "${energyPct}% AMP" else "00% AMP",
-                color = if (isSpeaking) highlightColor else TextMuted,
+                text = if (isActive) "${energyPct}% AMP" else "00% AMP",
+                color = if (isActive) statusDotColor else TextMuted,
                 fontSize = 8.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 fontFamily = FontFamily.Monospace,
@@ -185,7 +208,7 @@ fun SpeechAudioVisualizer(
 
             // 1. Subtle Dashed HUD Horizon Hairline
             drawLine(
-                color = secondaryColor.copy(alpha = if (isSpeaking) 0.30f else 0.16f),
+                color = secondaryColor.copy(alpha = if (isActive) 0.30f else 0.16f),
                 start = Offset(0f, centerY),
                 end = Offset(w, centerY),
                 strokeWidth = 1.dp.toPx(),
@@ -194,7 +217,7 @@ fun SpeechAudioVisualizer(
 
             // Corner HUD Reticle Brackets
             val tickLen = 6.dp.toPx()
-            val bracketColor = accentColor.copy(alpha = if (isSpeaking) 0.55f else 0.20f)
+            val bracketColor = accentColor.copy(alpha = if (isActive) 0.55f else 0.20f)
             val bracketStroke = 1.2.dp.toPx()
             drawLine(bracketColor, Offset(0f, 0f), Offset(tickLen, 0f), bracketStroke)
             drawLine(bracketColor, Offset(0f, 0f), Offset(0f, tickLen), bracketStroke)
@@ -225,20 +248,20 @@ fun SpeechAudioVisualizer(
 
             for (i in 0 until barCount) {
                 val bandEnergy = normalizedBands[i]
-                val harmonicRipple = if (isSpeaking && !disableAnimations) {
+                val harmonicRipple = if (isActive && !disableAnimations) {
                     0.85f + 0.15f * sin(phase * 2f + i * 0.52f)
                 } else {
                     1f
                 }
                 val halfHeight = (maxHalfAmp * bandEnergy * harmonicRipple)
-                    .coerceAtLeast(if (isSpeaking) 2.2.dp.toPx() else 1.2.dp.toPx())
+                    .coerceAtLeast(if (isActive) 2.2.dp.toPx() else 1.2.dp.toPx())
 
                 val x = horizontalPad + slotWidth * (i + 0.5f)
                 val topY = centerY - halfHeight
                 val bottomY = centerY + halfHeight
 
                 // Outer neon halo
-                if (isSpeaking && bandEnergy > 0.12f) {
+                if (isActive && bandEnergy > 0.12f) {
                     drawLine(
                         color = accentColor.copy(alpha = (0.14f + bandEnergy * 0.22f).coerceAtMost(0.38f)),
                         start = Offset(x, topY),
@@ -258,7 +281,7 @@ fun SpeechAudioVisualizer(
                 )
 
                 // Peak-hold glowing dot above dominant bars
-                if (isSpeaking && bandEnergy > 0.36f) {
+                if (isActive && bandEnergy > 0.36f) {
                     drawCircle(
                         color = highlightColor.copy(alpha = 0.88f),
                         radius = 1.4.dp.toPx(),
@@ -268,7 +291,7 @@ fun SpeechAudioVisualizer(
             }
 
             // 3. Dual Harmonic Cubic Bezier Oscilloscope Ribbon synced to bands
-            if (isSpeaking) {
+            if (isActive) {
                 primaryWavePath.reset()
                 mirrorWavePath.reset()
 

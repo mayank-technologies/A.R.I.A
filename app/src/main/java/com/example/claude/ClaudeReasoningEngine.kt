@@ -6,6 +6,8 @@ import com.example.BuildConfig
 import com.example.assistant.DeviceClockHelper
 import com.example.geminilive.GeminiLiveFunctionRegistry
 import com.example.geminilive.ToolExecutionOutput
+import com.example.speech.ArcVoiceGender
+import com.example.speech.VoicePreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -249,6 +251,18 @@ object ClaudeReasoningEngine {
             required = listOf("appName", "productQuery")
         )
 
+        addTool(
+            name = "readAllNotifications",
+            description = "Reads unread/recent notifications from all enabled apps (WhatsApp, SMS, Instagram, Gmail, etc.).",
+            props = JSONObject()
+        )
+
+        addTool(
+            name = "fillFormFields",
+            description = "Auto-fills visible on-screen form inputs (Name, Email, Phone, Address) using saved Personal Info while skipping passwords/sensitive/unknown fields.",
+            props = JSONObject()
+        )
+
         return tools
     }
 
@@ -269,7 +283,8 @@ object ClaudeReasoningEngine {
         userTranscript: String,
         userName: String = "Boss",
         executeTools: Boolean = true,
-        apiKeyOverride: String? = null
+        apiKeyOverride: String? = null,
+        memoryContext: String = ""
     ): ClaudeReasoningResult = withContext(Dispatchers.IO) {
         val apiKey = apiKeyOverride?.trim() ?: getApiKey()
         if (isPlaceholderKey(apiKey)) {
@@ -283,17 +298,26 @@ object ClaudeReasoningEngine {
             source = "ClaudeReasoningEngine"
         )
         val displayName = userName.ifBlank { "Boss" }
+        val activeGender = VoicePreferencesManager.getVoiceGender(context)
+        val activeVoiceName = VoicePreferencesManager.geminiVoiceNameFor(activeGender)
+        val genderLabel = if (activeGender == ArcVoiceGender.FEMALE) "female" else "male"
+        val grammarExample = if (activeGender == ArcVoiceGender.FEMALE) {
+            "Use warm, soft feminine Hindi/Hinglish grammar (e.g., \"kar rahi hu\", \"call laga rahi hu\", \"bata rahi hu\")."
+        } else {
+            "Use warm, natural masculine Hindi/Hinglish grammar (e.g., \"kar raha hu\", \"call laga raha hu\", \"bata raha hu\")."
+        }
+        val memorySection = if (memoryContext.isNotBlank()) "\n\n$memoryContext" else ""
 
         val systemPrompt = """
-            You are ARC's reasoning brain (partnering with Gemini Live male voice Charon).
+            You are ARC's reasoning brain (partnering with Gemini Live $genderLabel voice $activeVoiceName).
             User name: $displayName. Local device time: ${clock.formattedTime}, ${clock.formattedDate} (${clock.timeZoneId}).
             
             ROLE & STYLE:
             1. Analyze the user's command deeply and decide if an Android device tool should be called.
             2. Match the user's language (Hindi, English, Hinglish, Marathi, Gujarati, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi, or Urdu).
-            3. Always use warm, natural masculine Hindi/Hinglish grammar (e.g., "kar raha hu", "call laga raha hu", "bata raha hu").
-            4. Keep responses concise (1-3 sentences) because they will be spoken aloud by Gemini Live's Charon male voice.
-            5. SAFETY & HONESTY FOR RIDES / SHOPPING: For rides (`assistRideBooking`), if vehicle isn't specified, ask "Bike, car 4-seater, ya 6-seater?". NEVER say "booking confirm ho gayi" or "order ho gaya". Always state clearly that the user must tap Book/Add-to-Cart and complete final confirmation and payment themselves.
+            3. Always $grammarExample
+            4. Keep responses concise (1-3 sentences) because they will be spoken aloud by Gemini Live's $activeVoiceName $genderLabel voice.
+            5. SAFETY & HONESTY FOR RIDES / SHOPPING: For rides (`assistRideBooking`), if vehicle isn't specified, ask "Bike, car 4-seater, ya 6-seater?". NEVER say "booking confirm ho gayi" or "order ho gaya". Always state clearly that the user must tap Book/Add-to-Cart and complete final confirmation and payment themselves.$memorySection
         """.trimIndent()
 
         val payloadPrimary = buildRequestPayload(PRIMARY_CLAUDE_MODEL, systemPrompt, userTranscript)

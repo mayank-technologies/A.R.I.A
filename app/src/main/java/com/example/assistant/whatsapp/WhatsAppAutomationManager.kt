@@ -210,7 +210,8 @@ object WhatsAppAutomationManager {
 }
 
 /**
- * Android NotificationListenerService to intercept incoming WhatsApp notifications.
+ * Android NotificationListenerService to capture incoming notifications across ALL apps
+ * (WhatsApp, SMS, Instagram, Gmail, Telegram, etc.), respecting per-app Settings toggles.
  */
 class ArcNotificationListenerService : NotificationListenerService() {
 
@@ -221,30 +222,52 @@ class ArcNotificationListenerService : NotificationListenerService() {
 
         fun clearNotifications() {
             _notifications.value = emptyList()
+            com.example.assistant.notification.GeneralNotificationManager.clearAll()
         }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
-        val packageName = sbn.packageName
+        val packageName = sbn.packageName ?: return
+        val notification = sbn.notification ?: return
+        val extras: Bundle? = notification.extras
 
-        // Only listen for WhatsApp notifications
+        val isOngoing = (notification.flags and Notification.FLAG_ONGOING_EVENT) != 0
+        val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val bigText = extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty()
+        val normalText = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+        val previewText = bigText.ifBlank { normalText }.trim()
+
+        // 1. Capture into GeneralNotificationManager (all apps: SMS, Instagram, Gmail, WhatsApp, etc.)
+        com.example.assistant.notification.GeneralNotificationManager.recordIncomingNotification(
+            context = applicationContext,
+            packageName = packageName,
+            sender = title,
+            message = previewText,
+            postTime = sbn.postTime,
+            notificationId = sbn.key ?: "${sbn.id}_${sbn.postTime}",
+            isOngoing = isOngoing
+        )
+
+        // 2. Keep WhatsApp-specific list populated for "WhatsApp messages padho"
         if (packageName == "com.whatsapp" || packageName == "com.whatsapp.w4b") {
-            val extras: Bundle? = sbn.notification.extras
-            val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: "WhatsApp"
-            val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
-
-            if (text.isNotBlank() && !title.contains("WhatsApp", ignoreCase = true) && !title.contains("messages", ignoreCase = true)) {
+            val senderLabel = title.ifBlank { "WhatsApp" }
+            if (previewText.isNotBlank() &&
+                !senderLabel.contains("WhatsApp", ignoreCase = true) &&
+                !senderLabel.contains("messages", ignoreCase = true)
+            ) {
                 val timeFormatted = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(sbn.postTime))
                 val item = WhatsAppNotificationItem(
                     id = sbn.key ?: "${sbn.id}_${sbn.postTime}",
-                    sender = title,
-                    message = text,
+                    sender = senderLabel,
+                    message = previewText,
                     timestamp = sbn.postTime,
                     timeFormatted = timeFormatted
                 )
-                Log.d(TAG, "Captured WhatsApp Notification from $title: $text")
-                _notifications.value = (listOf(item) + _notifications.value).distinctBy { "${it.sender}_${it.message}" }.take(20)
+                Log.d(TAG, "Captured WhatsApp Notification from $senderLabel: $previewText")
+                _notifications.value = (listOf(item) + _notifications.value)
+                    .distinctBy { "${it.sender}_${it.message}" }
+                    .take(20)
             }
         }
     }

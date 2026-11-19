@@ -37,4 +37,23 @@ interface AriaDao {
 
     @Query("DELETE FROM voice_history")
     suspend fun clearHistory()
+
+    // Long-Term Memory Facts
+    @Query("SELECT * FROM long_term_memories ORDER BY updatedAt DESC")
+    fun getAllMemoryFacts(): Flow<List<MemoryFactEntity>>
+
+    @Query("SELECT * FROM long_term_memories ORDER BY updatedAt DESC")
+    suspend fun getAllMemoryFactsOnce(): List<MemoryFactEntity>
+
+    @Query("SELECT * FROM long_term_memories WHERE LOWER(factKey) = LOWER(:factKey) LIMIT 1")
+    suspend fun findMemoryByKey(factKey: String): MemoryFactEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMemoryFact(fact: MemoryFactEntity): Long
+
+    @Query("DELETE FROM long_term_memories WHERE id = :id")
+    suspend fun deleteMemoryFactById(id: Long)
+
+    @Query("DELETE FROM long_term_memories")
+    suspend fun clearAllMemoryFacts()
 }

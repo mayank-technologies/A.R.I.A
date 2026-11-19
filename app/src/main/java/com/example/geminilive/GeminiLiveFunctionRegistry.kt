@@ -19,12 +19,16 @@ import com.example.assistant.SmartAppOpener
 import com.example.assistant.WhatsAppActionResult
 import com.example.assistant.WhatsAppContactResolver
 import com.example.assistant.accessibility.AriaAccessibilityGestureService
+import com.example.assistant.accessibility.PersonalProfileManager
 import com.example.assistant.hardware.AndroidHardwareController
 import com.example.assistant.hardware.HardwareActionResult
+import com.example.assistant.notification.GeneralNotificationManager
 import com.example.assistant.security.AntiTheftSirenManager
 import com.example.assistant.whatsapp.WhatsAppAutomationManager
 import com.example.claude.ClaudeReasoningEngine
 import com.example.claude.ClaudeReasoningResult
+import com.example.data.AriaDatabase
+import com.example.data.MemoryRepository
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -272,6 +276,28 @@ object GeminiLiveFunctionRegistry {
             put("parameters", params)
         }
 
+        // 15. readAllNotifications
+        val readAllNotifications = JSONObject().apply {
+            put("name", "readAllNotifications")
+            put("description", "Reads unread/recent notifications across all enabled apps (WhatsApp, SMS, Instagram, Gmail, etc.) aloud with app name and preview text.")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            }
+            put("parameters", params)
+        }
+
+        // 16. fillFormFields
+        val fillFormFields = JSONObject().apply {
+            put("name", "fillFormFields")
+            put("description", "Auto-fills visible on-screen form inputs (Name, Email, Phone, Address) using saved Personal Info while skipping password/sensitive/unknown fields.")
+            val params = JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            }
+            put("parameters", params)
+        }
+
         val functionDeclarations = JSONArray().apply {
             put(openWhatsApp)
             put(openApp)
@@ -287,6 +313,8 @@ object GeminiLiveFunctionRegistry {
             put(openGoogleMapsRoute)
             put(assistRideBooking)
             put(assistShoppingSearch)
+            put(readAllNotifications)
+            put(fillFormFields)
         }
 
         val toolWrapper = JSONObject().apply {
@@ -326,6 +354,8 @@ object GeminiLiveFunctionRegistry {
             "openGoogleMapsRoute" -> executeOpenGoogleMapsRoute(context, callId, args)
             "assistRideBooking" -> executeAssistRideBooking(context, callId, args)
             "assistShoppingSearch" -> executeAssistShoppingSearch(context, callId, args)
+            "readAllNotifications" -> executeReadAllNotifications(context, callId)
+            "fillFormFields" -> executeFillFormFields(context, callId)
             else -> {
                 Log.w(TAG, "Unknown tool call: $functionName")
                 ToolExecutionOutput(
@@ -706,10 +736,16 @@ object GeminiLiveFunctionRegistry {
         }
 
         val result = runBlocking {
+            val memoryContext = try {
+                MemoryRepository(AriaDatabase.getDatabase(context).ariaDao()).buildPromptMemoryContext()
+            } catch (_: Exception) {
+                ""
+            }
             ClaudeReasoningEngine.reasonAndExecute(
                 context = context,
                 userTranscript = userQuery,
-                executeTools = true
+                executeTools = true,
+                memoryContext = memoryContext
             )
         }
 
@@ -896,5 +932,45 @@ object GeminiLiveFunctionRegistry {
                 verbalConfirmation = result.message
             )
         }
+    }
+
+    private fun executeReadAllNotifications(context: Context, callId: String): ToolExecutionOutput {
+        if (!WhatsAppAutomationManager.isNotificationAccessGranted(context)) {
+            WhatsAppAutomationManager.openNotificationAccessSettings(context)
+            val msg = "Notification Access permission enabled nahi hai. Maine settings screen khol di hai."
+            return ToolExecutionOutput(
+                callId = callId,
+                toolName = "readAllNotifications",
+                success = false,
+                responseData = JSONObject().apply { put("status", "permission_required") },
+                verbalConfirmation = msg
+            )
+        }
+        val summary = GeneralNotificationManager.getUnreadNotificationsSummary(context)
+        return ToolExecutionOutput(
+            callId = callId,
+            toolName = "readAllNotifications",
+            success = true,
+            responseData = JSONObject().apply { put("summary", summary) },
+            verbalConfirmation = summary
+        )
+    }
+
+    private fun executeFillFormFields(context: Context, callId: String): ToolExecutionOutput {
+        val profile = PersonalProfileManager.getProfile(context)
+        val result = runBlocking {
+            AriaAccessibilityGestureService.fillFormFieldsSuspend(profile)
+        }
+        return ToolExecutionOutput(
+            callId = callId,
+            toolName = "fillFormFields",
+            success = result.success,
+            responseData = JSONObject().apply {
+                put("filledCount", result.filledFields.size)
+                put("skippedCount", result.skippedCount)
+                put("message", result.message)
+            },
+            verbalConfirmation = result.message
+        )
     }
 }

@@ -3,6 +3,7 @@ package com.example.api
 import android.util.Log
 import com.example.BuildConfig
 import com.example.assistant.DeviceClockHelper
+import com.example.speech.ArcVoiceGender
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.OkHttpClient
@@ -140,7 +141,9 @@ object GeminiClient {
 
     suspend fun queryAriaAiDetailed(
         prompt: String,
-        apiKeyOverride: String? = null
+        apiKeyOverride: String? = null,
+        memoryContext: String = "",
+        voiceGender: ArcVoiceGender = ArcVoiceGender.MALE
     ): GeminiTextQueryResult {
         val rawKey = apiKeyOverride ?: BuildConfig.GEMINI_API_KEY
         val audit = inspectApiKey("GEMINI_API_KEY", rawKey)
@@ -158,12 +161,21 @@ object GeminiClient {
 
         val apiKey = rawKey.trim()
         val clockInfo = DeviceClockHelper.getCurrentDeviceClockInfo(logDebug = false, source = "GeminiTextAI")
+        val isFemale = voiceGender == ArcVoiceGender.FEMALE
+        val genderWord = if (isFemale) "female" else "male"
+        val grammarCue = if (isFemale) {
+            "use feminine Hindi/Hinglish grammar when replying in Hindi/Hinglish (e.g., kar rahi hu, bata rahi hu)"
+        } else {
+            "use masculine Hindi/Hinglish grammar when replying in Hindi/Hinglish (e.g., kar raha hu, bata raha hu)"
+        }
+        val memoryBlock = if (memoryContext.isNotBlank()) "\n\n$memoryContext" else ""
+
         val request = GeminiRequest(
             contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = prompt)))),
             systemInstruction = GeminiContent(
                 parts = listOf(
                     GeminiPart(
-                        text = "You are ARC (Autonomous Reactive Core), a warm, JARVIS-inspired male voice assistant. Your name is ARC. Current device local time: ${clockInfo.formattedTime}, ${clockInfo.formattedDate} (${clockInfo.timeZoneId}). Speak naturally with subtle warmth and use masculine Hindi/Hinglish grammar when replying in Hindi/Hinglish (e.g., kar raha hu, bata raha hu). Keep answers concise, helpful, and friendly (2-3 sentences max unless explaining code)."
+                        text = "You are ARC (Autonomous Reactive Core), a warm, JARVIS-inspired $genderWord voice assistant. Your name is ARC. Current device local time: ${clockInfo.formattedTime}, ${clockInfo.formattedDate} (${clockInfo.timeZoneId}). Speak naturally with subtle warmth and $grammarCue. Keep answers concise, helpful, and friendly (2-3 sentences max unless explaining code).$memoryBlock"
                     )
                 )
             )

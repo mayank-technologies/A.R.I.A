@@ -8,12 +8,19 @@ import com.example.api.GeminiClient
 import com.example.api.WeatherClient
 import com.example.api.WikipediaClient
 import com.example.assistant.AriaScreenLockManager
+import com.example.assistant.accessibility.AriaAccessibilityGestureService
+import com.example.assistant.accessibility.PersonalProfileManager
 import com.example.assistant.battery.AriaBatterySaverManager
+import com.example.assistant.memory.LongTermMemoryExtractor
+import com.example.assistant.memory.MemoryCandidate
+import com.example.assistant.notification.GeneralNotificationManager
 import com.example.claude.ClaudeReasoningEngine
 import com.example.claude.ClaudeReasoningResult
 import com.example.data.AriaDao
+import com.example.data.MemoryRepository
 import com.example.data.ReminderEntity
 import com.example.data.VoiceHistoryEntity
+import com.example.speech.VoicePreferencesManager
 import com.google.mlkit.nl.translate.TranslateLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -27,7 +34,8 @@ sealed class AriaCommandResult {
         val response: String,
         val category: String,
         val openUrl: String? = null,
-        val routineAction: String? = null
+        val routineAction: String? = null,
+        val pendingSensitiveMemory: MemoryCandidate? = null
     ) : AriaCommandResult()
     data class LaunchApp(val response: String, val appType: String) : AriaCommandResult()
     data class CloseBrowser(val response: String) : AriaCommandResult()
@@ -37,10 +45,46 @@ class AriaCommandProcessor(
     private val context: Context,
     private val ariaDao: AriaDao
 ) {
+    private val memoryRepository = MemoryRepository(ariaDao)
 
     suspend fun processCommand(userQuery: String, userName: String = "Boss"): AriaCommandResult = withContext(Dispatchers.IO) {
         val queryLower = userQuery.lowercase(Locale.ROOT).trim()
         val displayName = userName.ifBlank { "Boss" }
+
+        // 0.1 Long-Term Memory Extraction + Sensitive Data Privacy Guard
+        val memoryExtraction = LongTermMemoryExtractor.analyzeTranscript(userQuery)
+        if (memoryExtraction.safeFactsToAutoSave.isNotEmpty()) {
+            try {
+                memoryExtraction.safeFactsToAutoSave.forEach { fact ->
+                    memoryRepository.saveOrUpdateFact(
+                        factKey = fact.factKey,
+                        factValue = fact.factValue,
+                        category = fact.category,
+                        source = if (memoryExtraction.isExplicitRememberRequest) "Voice" else "Auto"
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w("AriaCommandProcessor", "Failed saving auto memory fact: ${e.message}")
+            }
+        }
+
+        if (memoryExtraction.pendingSensitiveConfirmation != null) {
+            val pending = memoryExtraction.pendingSensitiveConfirmation
+            val confirmReply = "Ye sensitive information lagti hai (${pending.sensitiveReason}). Security ke liye maine ise auto-save nahi kiya. Kya main ise Memory me save kar du? Settings > Memory ya confirm button se verify karein."
+            saveHistory(userQuery, confirmReply, "MEMORY_CONFIRM")
+            return@withContext AriaCommandResult.TextResponse(
+                response = confirmReply,
+                category = "MEMORY_CONFIRM",
+                pendingSensitiveMemory = pending
+            )
+        }
+
+        if (memoryExtraction.isExplicitRememberRequest && memoryExtraction.safeFactsToAutoSave.isNotEmpty()) {
+            val savedSummary = memoryExtraction.safeFactsToAutoSave.joinToString(", ") { it.factValue }
+            val reply = "Ji $displayName, maine yaad rakh liya hai: $savedSummary."
+            saveHistory(userQuery, reply, "MEMORY")
+            return@withContext AriaCommandResult.TextResponse(reply, "MEMORY")
+        }
 
         // 0.4 Custom Routines ("Good Morning ARC", "Good Night ARC", "office jaana hai")
         if (RoutineManager.isRoutineCommand(queryLower)) {
@@ -214,6 +258,46 @@ class AriaCommandProcessor(
             val summary = com.example.assistant.whatsapp.WhatsAppAutomationManager.getUnreadWhatsAppMessagesSummary()
             saveHistory(userQuery, summary, "WHATSAPP")
             return@withContext AriaCommandResult.TextResponse(summary, "WHATSAPP")
+        }
+
+        // 0.415B General Multi-App Notification Read-Aloud ("Notifications padho", "Read notifications")
+        if (queryLower.contains("notifications padho") || queryLower.contains("notification padho") ||
+            queryLower.contains("read notifications") || queryLower.contains("read all notifications") ||
+            queryLower.contains("notifications sunao") || queryLower.contains("notification sunao")
+        ) {
+            if (!com.example.assistant.whatsapp.WhatsAppAutomationManager.isNotificationAccessGranted(context)) {
+                com.example.assistant.whatsapp.WhatsAppAutomationManager.openNotificationAccessSettings(context)
+                val permMsg = "Boss, notifications padhne ke liye Notification Access permission enable kijiye. Maine settings screen khol di hai."
+                saveHistory(userQuery, permMsg, "NOTIFICATIONS")
+                return@withContext AriaCommandResult.TextResponse(permMsg, "NOTIFICATIONS")
+            }
+            val summary = GeneralNotificationManager.getUnreadNotificationsSummary(context)
+            saveHistory(userQuery, summary, "NOTIFICATIONS")
+            return@withContext AriaCommandResult.TextResponse(summary, "NOTIFICATIONS")
+        }
+
+        // 0.415C Voice-Triggered Forms Auto-Fill ("Form fill karo", "Fill form")
+        if (queryLower.contains("form fill") || queryLower.contains("fill form") ||
+            queryLower.contains("fill the form") || queryLower.contains("autofill") ||
+            queryLower.contains("form bharo") || queryLower.contains("form bhar do")
+        ) {
+            val profile = PersonalProfileManager.getProfile(context)
+            if (!profile.hasAnyField()) {
+                val emptyMsg = "Personal Info saved nahi hai. Pehle Settings > Personal Info me apna Name, Email, Phone ya Address save karein."
+                saveHistory(userQuery, emptyMsg, "AUTOFILL")
+                return@withContext AriaCommandResult.TextResponse(emptyMsg, "AUTOFILL")
+            }
+            val isEnabled = AriaAccessibilityGestureService.checkAccessibilityEnabled(context) ||
+                AriaAccessibilityGestureService.isServiceRunning()
+            if (!isEnabled) {
+                AriaAccessibilityGestureService.openAccessibilitySettings(context)
+                val errMsg = "Form fill karne ke liye ARC Accessibility Service ON kijiye. Maine Accessibility settings khol di hai."
+                saveHistory(userQuery, errMsg, "AUTOFILL")
+                return@withContext AriaCommandResult.TextResponse(errMsg, "AUTOFILL")
+            }
+            val fillResult = AriaAccessibilityGestureService.fillFormFieldsSuspend(profile)
+            saveHistory(userQuery, fillResult.message, "AUTOFILL")
+            return@withContext AriaCommandResult.TextResponse(fillResult.message, "AUTOFILL")
         }
 
         // 0.416 Screen Vision: Read Screen Content (Accessibility + ML Kit OCR), On-Device Translate, & Auto-Tap
@@ -716,12 +800,19 @@ class AriaCommandProcessor(
         }
 
         // 7. Conversational & Multi-Step Reasoning Brain: Claude (Anthropic) primary -> Gemini API fallback
+        val memoryContext = try {
+            memoryRepository.buildPromptMemoryContext()
+        } catch (_: Exception) {
+            ""
+        }
+        val activeVoiceGender = VoicePreferencesManager.getVoiceGender(context)
         Log.d(GeminiClient.CONN_DEBUG_TAG, "Text/Voice Command Routing -> trying ClaudeReasoningEngine first for '${userQuery.take(40)}'")
         val claudeResult = ClaudeReasoningEngine.reasonAndExecute(
             context = context,
             userTranscript = userQuery,
             userName = displayName,
-            executeTools = true
+            executeTools = true,
+            memoryContext = memoryContext
         )
         if (claudeResult is ClaudeReasoningResult.Success) {
             Log.d(GeminiClient.CONN_DEBUG_TAG, "Text/Voice Command resolved via CLAUDE_BRAIN")
@@ -733,7 +824,11 @@ class AriaCommandProcessor(
         Log.d(GeminiClient.CONN_DEBUG_TAG, "Claude fallback ($fallbackReason) -> routing to GeminiClient.queryAriaAiDetailed")
 
         // Seamless fallback to Gemini if Claude API key is missing or Anthropic endpoint fails
-        val aiResult = GeminiClient.queryAriaAiDetailed(userQuery)
+        val aiResult = GeminiClient.queryAriaAiDetailed(
+            prompt = userQuery,
+            memoryContext = memoryContext,
+            voiceGender = activeVoiceGender
+        )
         val category = if (aiResult.isSuccess) "AI" else "AI_ERROR"
         saveHistory(userQuery, aiResult.replyText, category)
         return@withContext AriaCommandResult.TextResponse(aiResult.replyText, category)

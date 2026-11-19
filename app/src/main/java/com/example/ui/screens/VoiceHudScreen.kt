@@ -289,6 +289,7 @@ fun VoiceHudScreen(
     val speechOutputBands by viewModel.speechOutputBands.collectAsState()
     val activeVoiceDebugInfo by viewModel.activeVoiceDebugInfo.collectAsState()
     val uiErrorMessage by viewModel.uiErrorMessage.collectAsState()
+    val pendingSensitiveMemory by viewModel.pendingSensitiveMemory.collectAsState()
 
     val isBatterySaverActive by AriaBatterySaverManager.isBatterySaverActive.collectAsState()
     val batteryLevel by AriaBatterySaverManager.batteryLevel.collectAsState()
@@ -661,16 +662,21 @@ fun VoiceHudScreen(
                         modifier = Modifier.padding(top = 6.dp)
                     )
 
-                    // Real-time Canvas Speech Output Audio Visualizer (synced with Gemini Live PCM / TTS)
+                    // Unified Real-time Canvas Audio Visualizer (Listening mic waveform + Speaking output waveform)
+                    val isSpeechOutputActive = effectiveStatus == AssistantStatus.SPEAKING ||
+                        isSpeaking ||
+                        speechOutputLevel > 0.02f
+                    val isWaveformVisible = isArcPoweredOn && (isSpeechOutputActive || isActivelyListening)
                     AnimatedVisibility(
-                        visible = isArcPoweredOn && (effectiveStatus == AssistantStatus.SPEAKING || isSpeaking || speechOutputLevel > 0.02f),
+                        visible = isWaveformVisible,
                         enter = fadeIn(tween(160)),
                         exit = fadeOut(tween(220))
                     ) {
                         SpeechAudioVisualizer(
-                            isSpeaking = effectiveStatus == AssistantStatus.SPEAKING || isSpeaking || speechOutputLevel > 0.02f,
-                            audioLevel = speechOutputLevel,
-                            audioBands = speechOutputBands,
+                            isSpeaking = isSpeechOutputActive,
+                            isListening = isActivelyListening && !isSpeechOutputActive,
+                            audioLevel = if (isSpeechOutputActive) speechOutputLevel else micVolumeLevel,
+                            audioBands = if (isSpeechOutputActive) speechOutputBands else emptyList(),
                             disableAnimations = isBatterySaverActive,
                             modifier = Modifier.padding(top = 8.dp)
                         )
@@ -737,6 +743,71 @@ fun VoiceHudScreen(
                                     tint = WarningAmber,
                                     modifier = Modifier.size(16.dp)
                                 )
+                            }
+                        }
+                    }
+
+                    // Privacy Guard Banner: requires explicit user tap before saving sensitive facts
+                    pendingSensitiveMemory?.let { pendingCandidate ->
+                        Column(
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .fillMaxWidth()
+                                .widthIn(max = 380.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(WarningAmber.copy(alpha = 0.12f))
+                                .border(1.dp, WarningAmber.copy(alpha = 0.65f), RoundedCornerShape(14.dp))
+                                .padding(12.dp)
+                                .testTag("sensitive_memory_confirmation_banner"),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "PRIVACY GUARD · SENSITIVE INFO DETECTED",
+                                color = WarningAmber,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "${pendingCandidate.sensitiveReason}. Save \"${pendingCandidate.factKey}\" to ARC Memory?",
+                                color = TextPrimary,
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { viewModel.confirmSaveSensitiveMemory() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .testTag("confirm_sensitive_memory_button")
+                                ) {
+                                    Text(
+                                        text = "Confirm Save",
+                                        color = DeepSpace,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                TextButton(
+                                    onClick = { viewModel.dismissPendingSensitiveMemory() },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .testTag("dismiss_sensitive_memory_button")
+                                ) {
+                                    Text(
+                                        text = "Don't Save",
+                                        color = WarningAmber,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
@@ -928,6 +999,41 @@ fun VoiceHudScreen(
                             fontSize = 11.5.sp,
                             lineHeight = 16.sp
                         )
+                    }
+                }
+
+                // Privacy Guard confirmation inside Chat Sheet as well
+                pendingSensitiveMemory?.let { pendingCandidate ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(WarningAmber.copy(alpha = 0.14f))
+                            .border(1.dp, WarningAmber.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Confirm Sensitive Memory: ${pendingCandidate.sensitiveReason}",
+                            color = WarningAmber,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { viewModel.confirmSaveSensitiveMemory() },
+                                colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan),
+                                modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                            ) {
+                                Text("Confirm Save", color = DeepSpace, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            TextButton(
+                                onClick = { viewModel.dismissPendingSensitiveMemory() },
+                                modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                            ) {
+                                Text("Don't Save", color = WarningAmber, fontSize = 11.sp)
+                            }
+                        }
                     }
                 }
 

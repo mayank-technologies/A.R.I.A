@@ -12,10 +12,19 @@ import androidx.lifecycle.viewModelScope
 import com.example.assistant.AriaCommandProcessor
 import com.example.assistant.AriaCommandResult
 import com.example.assistant.DeviceClockHelper
+import com.example.assistant.accessibility.PersonalProfileInfo
+import com.example.assistant.accessibility.PersonalProfileManager
+import com.example.assistant.memory.MemoryCandidate
+import com.example.assistant.notification.AppNotificationPreference
+import com.example.assistant.notification.GeneralNotificationManager
 import com.example.data.AriaDatabase
+import com.example.data.MemoryFactEntity
+import com.example.data.MemoryRepository
 import com.example.data.ReminderEntity
 import com.example.data.VoiceHistoryEntity
+import com.example.speech.ArcVoiceGender
 import com.example.speech.AriaSpeechEngine
+import com.example.speech.VoicePreferencesManager
 import com.example.speech.WakeWordState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,6 +33,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -52,6 +62,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AriaDatabase.getDatabase(application)
     private val dao = db.ariaDao()
+    private val memoryRepository = MemoryRepository(dao)
     private val commandProcessor = AriaCommandProcessor(application, dao)
     val speechEngine = AriaSpeechEngine(application)
     val geminiLiveManager = com.example.geminilive.GeminiLiveVoiceManager(application)
@@ -355,16 +366,33 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
     )
     val activityLogs: StateFlow<List<ActivityLogItem>> = _activityLogs.asStateFlow()
 
-    private val _memoryFacts = MutableStateFlow<List<MemoryFactItem>>(
-        listOf(
-            MemoryFactItem(key = "Operator Name", value = prefs.getString("user_name", "Boss") ?: "Boss", category = "Identity"),
-            MemoryFactItem(key = "Wake-Word State", value = "Hey ARC (Hands-free active)", category = "Settings"),
-            MemoryFactItem(key = "Primary Voice", value = "Gemini Live Male (Charon) + Male TTS", category = "Speech"),
-            MemoryFactItem(key = "Default Navigation", value = "Google Maps", category = "Apps"),
-            MemoryFactItem(key = "System Preference", value = "Hinglish + English Bilingual", category = "Language")
-        )
-    )
-    val memoryFacts: StateFlow<List<MemoryFactItem>> = _memoryFacts.asStateFlow()
+    val longTermMemories: StateFlow<List<MemoryFactEntity>> = memoryRepository.allMemories
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val memoryFacts: StateFlow<List<MemoryFactItem>> = longTermMemories
+        .map { entities ->
+            entities.map { entity ->
+                MemoryFactItem(
+                    id = entity.id.toString(),
+                    key = entity.factKey,
+                    value = entity.factValue,
+                    category = entity.category
+                )
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _pendingSensitiveMemory = MutableStateFlow<MemoryCandidate?>(null)
+    val pendingSensitiveMemory: StateFlow<MemoryCandidate?> = _pendingSensitiveMemory.asStateFlow()
+
+    private val _voiceGender = MutableStateFlow(VoicePreferencesManager.getVoiceGender(application))
+    val voiceGender: StateFlow<ArcVoiceGender> = _voiceGender.asStateFlow()
+
+    private val _notificationAppPrefs = MutableStateFlow<List<AppNotificationPreference>>(emptyList())
+    val notificationAppPrefs: StateFlow<List<AppNotificationPreference>> = _notificationAppPrefs.asStateFlow()
+
+    private val _personalProfile = MutableStateFlow(PersonalProfileManager.getProfile(application))
+    val personalProfile: StateFlow<PersonalProfileInfo> = _personalProfile.asStateFlow()
 
     private var timeChangeReceiver: BroadcastReceiver? = null
 
@@ -400,14 +428,30 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         com.example.api.GeminiClient.auditRuntimeKeys()
+        refreshNotificationAppPrefs()
+        viewModelScope.launch {
+            memoryRepository.allMemories.collect { facts ->
+                val summary = if (facts.isEmpty()) {
+                    ""
+                } else {
+                    buildString {
+                        append("SAVED LONG-TERM USER MEMORY (use subtly when relevant):\n")
+                        facts.take(12).forEach { fact ->
+                            append("- ${fact.factKey}: ${fact.factValue}\n")
+                        }
+                    }.trim()
+                }
+                geminiLiveManager.setLongTermMemoryContext(summary)
+            }
+        }
         android.util.Log.d(
             AriaSpeechEngine.VOICE_DEBUG_TAG,
-            "Startup Voice Audit | GeminiLiveDefault=${_isGeminiLiveMode.value} | GeminiKeyValid=${geminiLiveManager.hasValidApiKey()} | GeminiVoice=${com.example.geminilive.GeminiLiveVoiceManager.SELECTED_VOICE_NAME} | ElevenLabsVoice=${speechEngine.getActiveVoiceId()}"
+            "Startup Voice Audit | Gender=${_voiceGender.value} | GeminiLiveDefault=${_isGeminiLiveMode.value} | GeminiKeyValid=${geminiLiveManager.hasValidApiKey()} | GeminiVoice=${VoicePreferencesManager.geminiVoiceNameFor(_voiceGender.value)} | ElevenLabsVoice=${speechEngine.getActiveVoiceId()}"
         )
         geminiLiveManager.setOnFallbackSpeechListener { pendingText ->
             android.util.Log.w(
                 AriaSpeechEngine.VOICE_DEBUG_TAG,
-                "GeminiLive fallback listener triggered -> delegating to AriaSpeechEngine male TTS"
+                "GeminiLive fallback listener triggered -> delegating to AriaSpeechEngine (${_voiceGender.value}) TTS"
             )
             addActivityLog("🔊", "Voice Fallback Active", geminiLiveManager.activeVoiceDebugInfo.value)
             if (!speechEngine.isMuted.value) {
@@ -805,6 +849,7 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
                                 if (result.category == "AI_ERROR") {
                                     _uiErrorMessage.value = result.response
                                 }
+                                _pendingSensitiveMemory.value = result.pendingSensitiveMemory
                                 _latestResponse.value = result.response
                                 addActivityLog("💬", "Response generated", result.response.take(60) + if (result.response.length > 60) "..." else "")
                                 if (result.openUrl != null) {
@@ -1030,16 +1075,84 @@ class AriaViewModel(application: Application) : AndroidViewModel(application) {
         _activityLogs.value = listOf(newItem) + _activityLogs.value.take(20)
     }
 
-    fun addMemoryFact(key: String, value: String, category: String = "Custom") {
+    fun setVoiceGender(gender: ArcVoiceGender) {
+        _voiceGender.value = gender
+        VoicePreferencesManager.setVoiceGender(getApplication(), gender)
+        speechEngine.setVoiceGender(gender)
+        geminiLiveManager.setVoiceGender(gender)
+        val label = if (gender == ArcVoiceGender.FEMALE) "Female (Aoede / Rachel)" else "Male (Charon / Adam)"
+        addActivityLog("🎙️", "Voice Mode Changed", "Active voice: $label")
+    }
+
+    fun refreshNotificationAppPrefs() {
+        _notificationAppPrefs.value = GeneralNotificationManager.getAppPreferenceList(getApplication())
+    }
+
+    fun toggleAppNotification(packageName: String, appName: String, enabled: Boolean) {
+        GeneralNotificationManager.setAppEnabled(getApplication(), packageName, appName, enabled)
+        refreshNotificationAppPrefs()
+        addActivityLog("🔔", if (enabled) "Notifications Enabled" else "Notifications Muted", appName)
+    }
+
+    fun addMemoryFact(key: String, value: String, category: String = "Manual") {
         if (key.isBlank() || value.isBlank()) return
-        val newFact = MemoryFactItem(key = key.trim(), value = value.trim(), category = category)
-        _memoryFacts.value = listOf(newFact) + _memoryFacts.value
-        addActivityLog("🧠", "Memory saved", "$key: $value")
+        val cleanKey = key.trim()
+        val cleanValue = value.trim()
+        viewModelScope.launch {
+            memoryRepository.saveOrUpdateFact(
+                factKey = cleanKey,
+                factValue = cleanValue,
+                category = category,
+                source = "Manual"
+            )
+            addActivityLog("🧠", "Memory saved", "$cleanKey: $cleanValue")
+        }
+    }
+
+    fun deleteMemoryFactById(id: Long) {
+        viewModelScope.launch {
+            memoryRepository.deleteFact(id)
+            addActivityLog("🗑️", "Memory removed", "Fact #$id deleted")
+        }
     }
 
     fun removeMemoryFact(id: String) {
-        _memoryFacts.value = _memoryFacts.value.filter { it.id != id }
-        addActivityLog("🗑️", "Memory removed", "Fact deleted")
+        id.toLongOrNull()?.let { deleteMemoryFactById(it) }
+    }
+
+    fun clearAllMemories() {
+        viewModelScope.launch {
+            memoryRepository.clearAllFacts()
+            addActivityLog("🗑️", "All Memories Cleared", "Long-term memory store wiped by user")
+        }
+    }
+
+    fun confirmSaveSensitiveMemory() {
+        val pending = _pendingSensitiveMemory.value ?: return
+        _pendingSensitiveMemory.value = null
+        viewModelScope.launch {
+            memoryRepository.saveOrUpdateFact(
+                factKey = pending.factKey,
+                factValue = pending.factValue,
+                category = pending.category,
+                source = "ConfirmedSensitive"
+            )
+            val msg = "Theek hai Boss, aapki confirmation ke baad yeh note memory me save kar diya hai."
+            _latestResponse.value = msg
+            addActivityLog("🔐", "Sensitive Memory Confirmed", pending.factKey)
+            speakResponse(msg)
+        }
+    }
+
+    fun dismissPendingSensitiveMemory() {
+        _pendingSensitiveMemory.value = null
+        addActivityLog("🛡️", "Sensitive Save Skipped", "Not stored in memory")
+    }
+
+    fun savePersonalProfile(profile: PersonalProfileInfo) {
+        PersonalProfileManager.saveProfile(getApplication(), profile)
+        _personalProfile.value = PersonalProfileManager.getProfile(getApplication())
+        addActivityLog("📝", "Personal Info Updated", "Saved profile for Forms Auto-Fill")
     }
 
     fun clearVoiceHistory() {

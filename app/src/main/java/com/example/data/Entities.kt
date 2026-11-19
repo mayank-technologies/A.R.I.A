@@ -20,3 +20,15 @@ data class VoiceHistoryEntity(
     val category: String, // WEATHER, WIKIPEDIA, REMINDER, BROWSER, APP, TIME, AI
     val timestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "long_term_memories")
+data class MemoryFactEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val factKey: String,
+    val factValue: String,
+    val category: String = "Preference",
+    val source: String = "Auto",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+

@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">ARC</string>
-    <string name="accessibility_service_description">ARC Voice Assistant Accessibility Service enables automated voice gestures (scrolling shorts/reels, pausing/playing videos, and screen navigation) across apps using natural voice commands.</string>
+    <string name="accessibility_service_description">ARC Voice Assistant Accessibility Service enables automated voice gestures (scrolling reels, play/pause) and safe forms auto-fill using your saved Personal Info when you say "Form fill karo".</string>
 </resources>

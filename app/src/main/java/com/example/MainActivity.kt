@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -55,6 +57,7 @@ import com.example.ui.components.AriaWebViewDialog
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.QuickToolsScreen
 import com.example.ui.screens.RemindersScreen
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.VoiceHudScreen
 import com.example.ui.theme.AriaTheme
 import com.example.ui.theme.CyberCyan
@@ -241,6 +244,10 @@ fun AriaMainApp(viewModel: AriaViewModel) {
     val guardState by AntiTheftSirenManager.guardState.collectAsState()
     val triggerReason by AntiTheftSirenManager.triggerReason.collectAsState()
 
+    BackHandler(enabled = selectedTab != 0) {
+        selectedTab = 0
+    }
+
     activeWebUrl?.let { url ->
         com.example.assistant.SmartAppOpener.launchExternalBrowser(context, url)
         viewModel.closeWebBrowser()
@@ -340,6 +347,32 @@ fun AriaMainApp(viewModel: AriaViewModel) {
                     ),
                     modifier = Modifier.testTag("nav_quick_tools")
                 )
+
+                NavigationBarItem(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = if (selectedTab == 3) CyberCyan else TextSecondary
+                        )
+                    },
+                    label = {
+                        Text(
+                            text = "SETTINGS",
+                            fontSize = 10.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selectedTab == 3) CyberCyan else TextSecondary,
+                            letterSpacing = 1.sp
+                        )
+                    },
+                    colors = NavigationBarItemDefaults.colors(
+                        indicatorColor = CyberCyan.copy(alpha = 0.25f)
+                    ),
+                    modifier = Modifier.testTag("nav_settings")
+                )
             }
         }
     ) { innerPadding ->
@@ -353,6 +386,7 @@ fun AriaMainApp(viewModel: AriaViewModel) {
                 0 -> VoiceHudScreen(viewModel = viewModel)
                 1 -> RemindersScreen(viewModel = viewModel)
                 2 -> QuickToolsScreen(viewModel = viewModel)
+                3 -> SettingsScreen(viewModel = viewModel)
             }
         }
     }

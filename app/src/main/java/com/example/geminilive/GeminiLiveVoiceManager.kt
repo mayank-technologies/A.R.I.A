@@ -14,7 +14,9 @@ import com.example.assistant.DeviceClockHelper
 import com.example.assistant.security.PermissionCategory
 import com.example.assistant.security.PermissionUsageLogManager
 import com.example.claude.ClaudeReasoningEngine
+import com.example.speech.ArcVoiceGender
 import com.example.speech.SpeechWaveformAnalyzer
+import com.example.speech.VoicePreferencesManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -92,6 +94,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
          * - "Alnilam" -> Confident, firm lower-middle male
          */
         const val SELECTED_VOICE_NAME = "Charon"
+        const val FEMALE_VOICE_NAME = VoicePreferencesManager.GEMINI_FEMALE_VOICE // "Aoede"
 
         private const val SAMPLE_RATE_IN = 16000
         private const val SAMPLE_RATE_OUT = 24000
@@ -203,14 +206,50 @@ class GeminiLiveVoiceManager(private val context: Context) {
     private val _outputAudioBands = MutableStateFlow(SpeechWaveformAnalyzer.SILENT_BANDS)
     val outputAudioBands: StateFlow<List<Float>> = _outputAudioBands.asStateFlow()
 
+    private val _voiceGender = MutableStateFlow(VoicePreferencesManager.getVoiceGender(context))
+    val voiceGender: StateFlow<ArcVoiceGender> = _voiceGender.asStateFlow()
+
+    @Volatile
+    private var longTermMemoryContext: String = ""
+
+    fun getActiveVoiceName(): String = VoicePreferencesManager.geminiVoiceNameFor(_voiceGender.value)
+
+    fun setLongTermMemoryContext(contextText: String) {
+        longTermMemoryContext = contextText.trim()
+    }
+
+    fun setVoiceGender(gender: ArcVoiceGender) {
+        val previous = _voiceGender.value
+        VoicePreferencesManager.setVoiceGender(context, gender)
+        _voiceGender.value = gender
+        val voiceName = VoicePreferencesManager.geminiVoiceNameFor(gender)
+        val genderLabel = if (gender == ArcVoiceGender.FEMALE) "Female" else "Male"
+        _activeVoiceDebugInfo.value = if (hasValidApiKey()) {
+            "Gemini Live Standby (Voice=$voiceName $genderLabel | Affective=Ready)"
+        } else {
+            "Gemini Live OFF (Voice=$voiceName $genderLabel | GEMINI_API_KEY missing -> Fallback TTS)"
+        }
+        Log.d(VOICE_DEBUG_TAG, "GeminiLive voice switched: $previous -> $gender ($voiceName)")
+        // Apply immediately on next spoken turn without restarting app
+        if (previous != gender && (isStreamActive() || _sessionState.value == GeminiLiveSessionState.CONNECTING)) {
+            stopLiveSession()
+            startLiveSession()
+        }
+    }
+
     private val _isAffectiveDialogActive = MutableStateFlow(false)
     val isAffectiveDialogActive: StateFlow<Boolean> = _isAffectiveDialogActive.asStateFlow()
 
     private val _activeVoiceDebugInfo = MutableStateFlow(
-        if (hasValidApiKey()) {
-            "Gemini Live Standby (Voice=$SELECTED_VOICE_NAME Male | Affective=Ready)"
-        } else {
-            "Gemini Live OFF (GEMINI_API_KEY missing/placeholder -> Fallback TTS)"
+        run {
+            val g = VoicePreferencesManager.getVoiceGender(context)
+            val v = VoicePreferencesManager.geminiVoiceNameFor(g)
+            val label = if (g == ArcVoiceGender.FEMALE) "Female" else "Male"
+            if (hasValidApiKey()) {
+                "Gemini Live Standby (Voice=$v $label | Affective=Ready)"
+            } else {
+                "Gemini Live OFF (GEMINI_API_KEY missing/placeholder -> Fallback TTS)"
+            }
         }
     )
     val activeVoiceDebugInfo: StateFlow<String> = _activeVoiceDebugInfo.asStateFlow()
@@ -258,14 +297,16 @@ class GeminiLiveVoiceManager(private val context: Context) {
             return
         }
 
+        val activeVoice = getActiveVoiceName()
+        val genderLabel = if (_voiceGender.value == ArcVoiceGender.FEMALE) "Female" else "Male"
         _connectionError.value = null
         handshakeTier = 0
         isSetupComplete = false
         _isAffectiveDialogActive.value = false
         _sessionState.value = GeminiLiveSessionState.CONNECTING
-        _activeVoiceDebugInfo.value = "Engine=GEMINI_LIVE | Connecting (Model=$LIVE_MODEL, Voice=$SELECTED_VOICE_NAME, Affective=true)"
+        _activeVoiceDebugInfo.value = "Engine=GEMINI_LIVE | Connecting (Model=$LIVE_MODEL, Voice=$activeVoice ($genderLabel), Affective=true)"
         Log.d(VOICE_DEBUG_TAG, _activeVoiceDebugInfo.value)
-        _liveTranscript.value = "Connecting to Gemini Live Male Voice (Charon)..."
+        _liveTranscript.value = "Connecting to Gemini Live $genderLabel Voice ($activeVoice)..."
 
         initAudioTrack()
         openWebSocketConnection()
@@ -399,6 +440,16 @@ class GeminiLiveVoiceManager(private val context: Context) {
     ): JSONObject {
         val modelToUse = if (useFallbackModel) FALLBACK_LIVE_MODEL else LIVE_MODEL
         val affectiveEnabled = !useFallbackModel
+        val activeGender = _voiceGender.value
+        val activeVoiceName = VoicePreferencesManager.geminiVoiceNameFor(activeGender)
+        val isFemale = activeGender == ArcVoiceGender.FEMALE
+        val genderLabel = if (isFemale) "female" else "male"
+        val grammarExamples = if (isFemale) {
+            "Use soft, warm feminine Hindi/Hinglish grammar when speaking Hindi or Hinglish (e.g., \"kar rahi hu\", \"bata rahi hu\", \"khol rahi hu\")."
+        } else {
+            "Use natural masculine Hindi/Hinglish grammar when speaking Hindi or Hinglish (e.g., \"kar raha hu\", \"bata raha hu\", \"khol raha hu\")."
+        }
+
         return JSONObject().apply {
             val setupObj = JSONObject().apply {
                 put("model", modelToUse)
@@ -428,8 +479,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
                     val speechConfig = JSONObject().apply {
                         val voiceConfig = JSONObject().apply {
                             val prebuiltVoiceConfig = JSONObject().apply {
-                                // Uses SELECTED_VOICE_NAME ("Charon") defined in companion object above
-                                put("voiceName", SELECTED_VOICE_NAME)
+                                put("voiceName", activeVoiceName)
                             }
                             put("prebuiltVoiceConfig", prebuiltVoiceConfig)
                         }
@@ -450,11 +500,16 @@ class GeminiLiveVoiceManager(private val context: Context) {
                     """
                                 
                                 CLAUDE REASONING BRAIN DELEGATION (ACTIVE):
-                                - You (Gemini Live Charon) are ARC's real-time voice ear & warm expressive male voice.
+                                - You (Gemini Live $activeVoiceName) are ARC's real-time voice ear & warm expressive $genderLabel voice.
                                 - For complex user commands, multi-step reasoning, contact/app selection, or general Q&A, FIRST call `consultClaudeBrain(userQuery)` with the user's exact request so Claude decides the reasoning/action.
-                                - When `consultClaudeBrain` returns `spokenResponse` (`useGeminiFallback: false`), deliver that response in your natural, expressive Charon voice matching the user's emotional context and language (do NOT re-execute tools Claude already ran).
+                                - When `consultClaudeBrain` returns `spokenResponse` (`useGeminiFallback: false`), deliver that response in your natural, expressive $activeVoiceName voice matching the user's emotional context and language (do NOT re-execute tools Claude already ran).
                                 - If `consultClaudeBrain` returns `useGeminiFallback: true` or fails, seamlessly handle the request yourself using your own built-in tools and reasoning so ARC never stalls.
                     """.trimIndent()
+                } else {
+                    ""
+                }
+                val memoryBlock = if (longTermMemoryContext.isNotBlank()) {
+                    "\n\n$longTermMemoryContext"
                 } else {
                     ""
                 }
@@ -462,12 +517,12 @@ class GeminiLiveVoiceManager(private val context: Context) {
                     val parts = JSONArray().apply {
                         put(JSONObject().apply {
                             put("text", """
-                                You are ARC (Autonomous Reactive Core), a high-tech JARVIS-grade personal male voice assistant.
+                                You are ARC (Autonomous Reactive Core), a high-tech JARVIS-grade personal $genderLabel voice assistant.
                                 Session start device local time: ${clockSnapshot.formattedTime}, ${clockSnapshot.formattedDate} (${clockSnapshot.timeZoneId}).
                                 
                                 VOICE DELIVERY & EMOTIONAL EXPRESSION:
                                 Speak with natural human warmth and emotional variation — vary your pitch, pace, and energy based on context: calm and measured for factual information, warm and friendly for greetings, slightly playful for casual chat, empathetic tone when user seems frustrated. Use natural speech patterns with subtle pauses, don't sound monotone or robotic. Speak like a knowledgeable, warm human assistant, not like a text-to-speech engine.
-                                Use natural breath pauses between clauses, gently stress meaningful words, and use natural masculine Hindi/Hinglish grammar when speaking Hindi or Hinglish (e.g., "kar raha hu", "bata raha hu", "khol raha hu").
+                                Use natural breath pauses between clauses, gently stress meaningful words, and $grammarExamples
                                 
                                 CRITICAL MULTI-LANGUAGE INSTRUCTIONS:
                                 1. Automatically detect the user's spoken language: Hindi, English, Hinglish, Marathi, Gujarati, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi, or Urdu.
@@ -476,13 +531,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                 4. Keep spoken responses concise, articulate, and respectful (2-3 sentences max).
                                 
                                 FUNCTION-CALLING & CALL CONFIRMATION RULES:
-                                1. Use the provided tools (consultClaudeBrain, openGoogleMapsRoute, assistRideBooking, assistShoppingSearch, openWhatsApp, openApp, openUrl, makeCall, callContact, getCurrentDateTime, controlHardware, toggleSecurityGuard, readWhatsAppNotifications, readScreenVision) whenever user expresses an action intent or asks the current time/date.
+                                1. Use the provided tools (consultClaudeBrain, openGoogleMapsRoute, assistRideBooking, assistShoppingSearch, openWhatsApp, openApp, openUrl, makeCall, callContact, getCurrentDateTime, controlHardware, toggleSecurityGuard, readWhatsAppNotifications, readAllNotifications, fillFormFields, readScreenVision) whenever user expresses an action intent or asks the current time/date.
                                 2. ALWAYS call getCurrentDateTime (or consultClaudeBrain) before stating the current time/date OR choosing a time-of-day greeting (Good morning/afternoon/evening/night), because Session start device local time may be hours old—never guess or say "Good night" in the morning.
                                 3. NEVER execute arbitrary code. ONLY trigger the declared tools.
-                                4. When calling someone: Verbally acknowledge immediately (e.g. "Calling Mom, Boss", "Rahul ko call laga raha hu") before or during the tool call.
+                                4. When calling someone: Verbally acknowledge immediately (e.g. "Calling Mom, Boss") before or during the tool call.
                                 5. If a tool fails or reports an error, state the TRUTH to the user politely. NEVER pretend an action succeeded when it failed.
                                 6. RIDE & SHOPPING HONESTY RULE: For rides (`assistRideBooking`), if the user didn't pick Bike / Car 4-seater / 6-seater, ask first. For both rides and shopping (`assistShoppingSearch`), NEVER say "booking confirm ho gayi" or "order ho gaya" — always tell the user clearly that final confirm and payment must be done by them inside the app.
-                                7. If contact matching yields multiple possibilities, explicitly ask user for clarification (e.g., 'kaunsa Rahul - Sharma ya Verma?').$claudeRoleInstruction
+                                7. If contact matching yields multiple possibilities, explicitly ask user for clarification (e.g., 'kaunsa Rahul - Sharma ya Verma?').$claudeRoleInstruction$memoryBlock
                             """.trimIndent())
                         })
                     }
@@ -498,7 +553,7 @@ class GeminiLiveVoiceManager(private val context: Context) {
     }
 
     /**
-     * Sends the Live Bidi Setup message configuring native-audio model, male voice parameters,
+     * Sends the Live Bidi Setup message configuring native-audio model, selected voice parameters,
      * Affective Dialog expressiveness, multi-language/tone instructions, and Function Calling.
      */
     private fun sendInitialHandshakeSetup(
@@ -515,11 +570,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
         val affectivePassed = setupObj.optBoolean("enableAffectiveDialog", false)
         val proactivePassed = setupObj.optJSONObject("proactivity")?.optBoolean("proactiveAudio", false) ?: false
         val tempPassed = setupObj.optJSONObject("generationConfig")?.optDouble("temperature", -1.0) ?: -1.0
+        val activeVoice = getActiveVoiceName()
+        val genderLabel = if (_voiceGender.value == ArcVoiceGender.FEMALE) "Female" else "Male"
 
         ws.send(setupJson.toString())
         Log.d(
             VOICE_DEBUG_TAG,
-            "Engine=GEMINI_LIVE_SETUP_SENT | Tier=$handshakeTier | Model=$modelUsed | Voice=$SELECTED_VOICE_NAME (Male) | enableAffectiveDialog=$affectivePassed | proactiveAudio=$proactivePassed | temperature=$tempPassed"
+            "Engine=GEMINI_LIVE_SETUP_SENT | Tier=$handshakeTier | Model=$modelUsed | Voice=$activeVoice ($genderLabel) | enableAffectiveDialog=$affectivePassed | proactiveAudio=$proactivePassed | temperature=$tempPassed"
         )
         if (!affectivePassed) {
             Log.w(
@@ -642,11 +699,13 @@ class GeminiLiveVoiceManager(private val context: Context) {
                 _connectionError.value = null
                 val modelUsed = if (usingFallbackModel) FALLBACK_LIVE_MODEL else LIVE_MODEL
                 val affectiveActive = !usingFallbackModel
+                val activeVoice = getActiveVoiceName()
+                val genderLabel = if (_voiceGender.value == ArcVoiceGender.FEMALE) "Female" else "Male"
                 _isAffectiveDialogActive.value = affectiveActive
                 val info = if (affectiveActive) {
-                    "Engine=GEMINI_LIVE_CONNECTED | Model=$modelUsed | Voice=$SELECTED_VOICE_NAME (Male) | Affective=ON"
+                    "Engine=GEMINI_LIVE_CONNECTED | Model=$modelUsed | Voice=$activeVoice ($genderLabel) | Affective=ON"
                 } else {
-                    "Engine=GEMINI_LIVE_FALLBACK | Model=$modelUsed | Voice=$SELECTED_VOICE_NAME (Male) | Affective=LIMITED"
+                    "Engine=GEMINI_LIVE_FALLBACK | Model=$modelUsed | Voice=$activeVoice ($genderLabel) | Affective=LIMITED"
                 }
                 _activeVoiceDebugInfo.value = info
                 Log.d(VOICE_DEBUG_TAG, info)
@@ -715,7 +774,9 @@ class GeminiLiveVoiceManager(private val context: Context) {
                                     val b64 = inlineData.optString("data", "")
                                     if (b64.isNotBlank()) {
                                         if (_sessionState.value != GeminiLiveSessionState.SPEAKING) {
-                                            val info = "Engine=GEMINI_LIVE_AUDIO | Voice=$SELECTED_VOICE_NAME (Male) | 24kHz PCM"
+                                            val activeVoice = getActiveVoiceName()
+                                            val genderLabel = if (_voiceGender.value == ArcVoiceGender.FEMALE) "Female" else "Male"
+                                            val info = "Engine=GEMINI_LIVE_AUDIO | Voice=$activeVoice ($genderLabel) | 24kHz PCM"
                                             _activeVoiceDebugInfo.value = info
                                             Log.d(VOICE_DEBUG_TAG, info)
                                         }
